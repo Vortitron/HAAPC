@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add APC PDU",
+        "description": "Enter the details of your APC PDU",
+        "data": {
+          "host": "IP Address",
+          "community": "SNMP Community String",
+          "name": "Device Name (optional)",
+          "snmp_version": "SNMP Version"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to PDU. Please check the IP address and SNMP community string.",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
+

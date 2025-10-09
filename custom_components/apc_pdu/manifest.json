@@ -1,0 +1,13 @@
+{
+  "domain": "apc_pdu",
+  "name": "APC PDU",
+  "codeowners": ["@vortitron"],
+  "config_flow": true,
+  "documentation": "https://github.com/vortitron/HAAPC",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/vortitron/HAAPC/issues",
+  "requirements": ["pysnmp==4.4.12"],
+  "version": "1.0.0"
+}
+
