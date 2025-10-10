@@ -53,21 +53,29 @@ class SNMPClient:
     def __init__(self, host: str, community: str, version: str = "1") -> None:
         """Initialize the SNMP client."""
         if not SNMP_AVAILABLE:
+            _LOGGER.error("pysnmp import failed: %s", _IMPORT_ERROR)
             raise ImportError(
                 f"pysnmp is not available or has broken dependencies. "
                 f"Error: {_IMPORT_ERROR}. "
-                f"This is a known issue with Home Assistant 2024.10.x. "
-                f"Please use Demo Mode or see INSTALL_TROUBLESHOOTING.md"
+                f"Please use Demo Mode or CLI fallback"
             )
         
         self.host = host
         self.community = community
         self.version = 0 if version == "1" else 1  # 0 = v1, 1 = v2c
         self.port = 161
+        
+        _LOGGER.warning(
+            "SNMPClient initialized: host=%s, version=%s (mpModel=%d), port=%d",
+            host, version, self.version, self.port
+        )
 
     def _snmp_get(self, oid: str) -> Any:
         """Get a single SNMP value."""
         try:
+            _LOGGER.info("SNMP GET: %s from %s (community: %s***, version: %s)", 
+                        oid, self.host, self.community[:2], self.version)
+            
             iterator = getCmd(
                 SnmpEngine(),
                 CommunityData(self.community, mpModel=self.version),
@@ -79,11 +87,12 @@ class SNMPClient:
             error_indication, error_status, error_index, var_binds = next(iterator)
             
             if error_indication:
-                _LOGGER.debug("SNMP error indication: %s", error_indication)
+                _LOGGER.error("SNMP error indication for OID %s: %s", oid, error_indication)
                 return None
             elif error_status:
-                _LOGGER.debug(
-                    "SNMP error status: %s at %s",
+                _LOGGER.error(
+                    "SNMP error status for OID %s: %s at %s",
+                    oid,
                     error_status.prettyPrint(),
                     error_index and var_binds[int(error_index) - 1][0] or "?",
                 )
@@ -93,14 +102,17 @@ class SNMPClient:
                     value = var_bind[1]
                     # Convert to string if it's a DisplayString or similar
                     if hasattr(value, 'prettyPrint'):
-                        return value.prettyPrint()
+                        result = value.prettyPrint()
                     # Convert to int if it's a numeric string
-                    if isinstance(value, str) and value.isdigit():
-                        return int(value)
-                    return value
+                    elif isinstance(value, str) and value.isdigit():
+                        result = int(value)
+                    else:
+                        result = value
+                    _LOGGER.info("SNMP GET result for %s: %s (type: %s)", oid, result, type(result).__name__)
+                    return result
                     
         except Exception as ex:
-            _LOGGER.debug("SNMP get exception for OID %s: %s", oid, ex)
+            _LOGGER.error("SNMP get exception for OID %s: %s (type: %s)", oid, ex, type(ex).__name__, exc_info=True)
             return None
 
     def _snmp_set(self, oid: str, value: int) -> bool:
@@ -131,7 +143,8 @@ class SNMPClient:
 
     def get_device_info(self) -> dict[str, Any]:
         """Get device information."""
-        return {
+        _LOGGER.warning("Getting device info from %s...", self.host)
+        result = {
             "name": self._snmp_get(OID_PDU_NAME),
             "model": self._snmp_get(OID_MODEL),
             "serial_number": self._snmp_get(OID_SERIAL),
@@ -139,6 +152,8 @@ class SNMPClient:
             "hardware": self._snmp_get(OID_HARDWARE_REV),
             "outlet_count": self._snmp_get(OID_OUTLET_COUNT),
         }
+        _LOGGER.warning("Device info result: %s", result)
+        return result
 
     def get_pdu_status(self) -> dict[str, Any]:
         """Get overall PDU status."""
