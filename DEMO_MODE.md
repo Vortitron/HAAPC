@@ -1,19 +1,25 @@
-# Demo Mode - Test Without Hardware
+# Demo Mode - Test With or Without Hardware
 
-The APC PDU integration now includes a **Demo Mode** for testing without actual hardware!
+The APC PDU integration now includes an **intelligent Demo Mode** that can test real SNMP or use simulation!
 
 ## What is Demo Mode?
 
-Demo Mode creates a **simulated APC PDU** that behaves just like the real thing, but doesn't require:
-- ❌ Actual PDU hardware
-- ❌ Network connectivity to a PDU
-- ❌ SNMP configuration
+Demo Mode creates a **hybrid testing environment** that:
+- ✅ **Tries real SNMP first** (if pysnmp is available and PDU is accessible)
+- ✅ **Falls back to simulation** (if real SNMP fails)
+- ✅ **Always works** (never fails, always provides PDU data)
+
+This means you don't need:
+- ❌ Physical PDU access (falls back to simulation)
+- ❌ Working SNMP (falls back to simulation)
+- ❌ Network connectivity (falls back to simulation)
 
 Perfect for:
-- ✅ Testing the integration on a cloud server
-- ✅ Development and debugging
-- ✅ Demonstrations
-- ✅ Learning Home Assistant automations
+- ✅ **Testing SNMP on cloud servers** - See if pysnmp works before deploying
+- ✅ **Safe testing with real PDU** - Control real PDU but with safety fallback
+- ✅ **Development and debugging** - Always-working test environment
+- ✅ **Demonstrations** - Reliable demo that works anywhere
+- ✅ **Learning Home Assistant automations** - Practice without risking real hardware
 
 ## How to Enable Demo Mode
 
