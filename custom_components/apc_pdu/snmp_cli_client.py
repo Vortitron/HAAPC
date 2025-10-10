@@ -33,16 +33,26 @@ class SNMPCLIClient:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             import os
             if os.path.exists('/usr/src/homeassistant'):
-                _LOGGER.info(
-                    "Home Assistant OS detected. Command-line SNMP tools not available. "
-                    "The integration will use Python pysnmp when HA fixes it, or use Demo Mode for testing. "
+                _LOGGER.error(
+                    "⚠️ Home Assistant OS detected. Command-line SNMP tools not available. "
+                    "CLI fallback won't work. Please use Demo Mode for testing. "
                     "See HAOS_COMPATIBILITY.md for details."
+                )
+                # Raise an error so config flow knows CLI isn't available
+                raise ImportError(
+                    "SNMP CLI tools not available in Home Assistant OS. "
+                    "Use Demo Mode or wait for pysnmp to be fixed in HA Core."
                 )
             else:
                 _LOGGER.warning(
                     "snmpget command not found. For Home Assistant Core, install with: "
                     "sudo apt-get install snmp (Debian/Ubuntu) or "
                     "sudo yum install net-snmp-utils (RedHat/CentOS)"
+                )
+                # Raise an error so config flow knows CLI isn't available
+                raise ImportError(
+                    "SNMP CLI tools (snmpget/snmpset) not installed. "
+                    "Install with: sudo apt-get install snmp"
                 )
 
     def _snmp_get(self, oid: str) -> Any:

@@ -56,17 +56,30 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             )
             _LOGGER.warning("✅ Successfully initialized pysnmp client")
         except ImportError as err:
-            # pysnmp not available - use CLI fallback
+            # pysnmp not available - try CLI fallback
             _LOGGER.warning(
-                "⚠️ pysnmp not available (%s), using command-line SNMP tools as fallback",
+                "⚠️ pysnmp not available (%s), trying command-line SNMP tools as fallback",
                 err
             )
-            client = SNMPCLIClient(
-                host=data[CONF_HOST],
-                community=data[CONF_COMMUNITY],
-                version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-            )
-            _LOGGER.warning("✅ Successfully initialized CLI SNMP client")
+            try:
+                client = SNMPCLIClient(
+                    host=data[CONF_HOST],
+                    community=data[CONF_COMMUNITY],
+                    version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+                )
+                _LOGGER.warning("✅ Successfully initialized CLI SNMP client")
+            except ImportError as cli_err:
+                # CLI tools also not available
+                _LOGGER.error(
+                    "❌ Both pysnmp and CLI tools unavailable. "
+                    "Original pysnmp error: %s. CLI error: %s. "
+                    "Please enable Demo Mode for testing.",
+                    err, cli_err
+                )
+                raise CannotConnect(
+                    "SNMP not available. Both pysnmp and CLI tools failed. "
+                    "Please enable Demo Mode or wait for Home Assistant to fix pysnmp."
+                ) from cli_err
     
     # Test connection by getting device info
     _LOGGER.warning("Testing connection by retrieving device info...")

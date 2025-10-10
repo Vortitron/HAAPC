@@ -7,7 +7,7 @@
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/vortitron/HAAPC/issues",
-  "requirements": [],
-  "version": "0.0.2"
+  "requirements": ["pysnmp==7.1.7"],
+  "version": "0.0.3"
 }
 
