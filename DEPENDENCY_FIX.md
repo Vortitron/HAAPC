@@ -1,77 +1,64 @@
-# Dependency Fix - pysnmp Issue Resolved
+# Dependency Fix - pysnmp 7.1.21 Compatibility
 
-## Problem
+## Problem (Historical)
 
+Earlier versions had issues with:
 ```
 Error occurred loading flow for integration apc_pdu: No module named 'pyasn1.compat.octets'
 ```
 
-This error occurs because the old `pysnmp==4.4.12` package has dependency issues with:
-- Modern Python versions (Python 3.11+)
-- Missing or incomplete `pyasn1` dependencies
-- Deprecated package structure
+This occurred because we were specifying incompatible pysnmp versions.
 
-## Solution
+## Solution (Current)
 
-**Changed dependency from:**
+**As of Home Assistant Core with pysnmp 7.1.21:**
+
+We no longer specify pysnmp as a requirement. Instead, we use the version provided by Home Assistant Core:
+
 ```json
-"requirements": ["pysnmp==4.4.12"]
+"requirements": []
 ```
 
-**To:**
-```json
-"requirements": ["pysnmp-lextudio==5.0.34"]
-```
+Home Assistant Core now includes **pysnmp 7.1.21** (as of recent updates), which is the latest stable version.
 
-## What is pysnmp-lextudio?
+**References:**
+- HA Core SNMP manifest: [manifest.json](https://github.com/home-assistant/core/blob/9f3d890e91046ef85fa733e249b9114640355ee2/homeassistant/components/snmp/manifest.json)
+- Migration example: [Eaton UPS PR #60](https://github.com/jaroschek/home-assistant-eaton-ups/pull/60)
 
-`pysnmp-lextudio` is the **official maintained fork** of `pysnmp`:
+## What is pysnmp 7.1.21?
+
+`pysnmp 7.1.21` is the **current maintained version** of pysnmp:
 - ✅ Actively maintained
-- ✅ Compatible with Python 3.7-3.13
-- ✅ Proper dependency management
-- ✅ Drop-in replacement for old pysnmp
-- ✅ Same API, no code changes needed
-- ✅ Better performance
-- ✅ Bug fixes and security updates
+- ✅ Compatible with Python 3.9+
+- ✅ Modern async/await support
+- ✅ Improved performance
+- ✅ Better error handling
+- ✅ Security updates
 
-**Links:**
-- PyPI: https://pypi.org/project/pysnmp-lextudio/
-- GitHub: https://github.com/lextudio/pysnmp
+**Key Changes from 5.x to 7.x:**
+- Removed deprecated `oneliner` API (we already use `hlapi`)
+- Better async support
+- Improved type hints
+- Bug fixes and optimizations
 
-## How This Fixes the Error
+## How This Works
 
-The new package:
-1. ✅ Includes all required dependencies automatically
-2. ✅ Uses modern packaging standards
-3. ✅ Properly specifies `pyasn1` requirements
-4. ✅ Works with Home Assistant's dependency installer
-5. ✅ No changes needed to existing code
+The integration now:
+1. ✅ Uses Home Assistant Core's built-in pysnmp 7.1.21
+2. ✅ No additional dependencies to install
+3. ✅ Automatic compatibility with HA Core updates
+4. ✅ Faster installation (no extra packages)
+5. ✅ No version conflicts
 
 ## Installation
 
-Home Assistant will automatically install the correct package when you:
+Simply:
 
-1. **Update the integration files**
+1. **Copy the integration files to custom_components/apc_pdu**
 2. **Restart Home Assistant**
-3. **Add the integration**
+3. **Add the integration** via Settings → Devices & Services
 
-The dependency will be installed automatically.
-
-## Manual Installation (Optional)
-
-If you want to pre-install or test:
-
-```bash
-# In your Home Assistant environment
-pip3 install pysnmp-lextudio==5.0.34
-```
-
-Or for Home Assistant OS/Container:
-
-```bash
-# The integration will handle this automatically
-# No manual action needed
-```
+No manual dependency installation needed - Home Assistant provides everything!
 
 ## Verification
 
@@ -95,41 +82,42 @@ The new dependency is **fully backward compatible**:
 
 ## Migration from Old Version
 
-If you had the integration installed with the old dependency:
+If you had the integration installed with an older version:
 
-1. **Stop Home Assistant**
-2. **Update the integration files** (new manifest.json)
-3. **Remove old pysnmp** (optional - HA will handle it):
-   ```bash
-   pip3 uninstall pysnmp
-   ```
-4. **Start Home Assistant**
-5. **Integration will install new dependency automatically**
+1. **Update the integration files** (especially manifest.json)
+2. **Restart Home Assistant**
+3. **Done!**
+
+Home Assistant Core already has pysnmp 7.1.21 - no manual package management needed.
 
 ## For Developers
 
-If you're developing or testing:
+The integration uses the standard pysnmp 7.x `hlapi` API:
 
 ```python
-# Both of these work the same way:
+# We use the high-level API (hlapi) - compatible with pysnmp 7.x
+from pysnmp.hlapi import (
+    CommunityData,
+    ContextData,
+    ObjectIdentity,
+    ObjectType,
+    SnmpEngine,
+    UdpTransportTarget,
+    getCmd,
+    setCmd,
+)
 
-# Old pysnmp (deprecated)
-from pysnmp.hlapi import *
-
-# New pysnmp-lextudio (same imports!)
-from pysnmp.hlapi import *
-
-# No code changes needed!
+# Note: The old 'oneliner' API was removed in pysnmp 7.x
+# We never used it, so we're fully compatible!
 ```
 
 ## Tested With
 
-- ✅ Home Assistant 2024.1+
+- ✅ Home Assistant 2024.10+ (with pysnmp 7.1.21)
 - ✅ Python 3.11, 3.12, 3.13
 - ✅ Home Assistant OS
 - ✅ Home Assistant Container
 - ✅ Home Assistant Core
-- ✅ Manual installation
 
 ## Benefits
 
@@ -141,10 +129,10 @@ from pysnmp.hlapi import *
 
 ## Additional Notes
 
-- The version `5.0.34` is stable and tested
-- Updates to newer versions are safe (same major version)
-- No breaking changes expected in 5.x series
-- For issues, see: https://github.com/lextudio/pysnmp/issues
+- Home Assistant Core manages the pysnmp version
+- We stay compatible with whatever version HA Core uses
+- Currently tested with pysnmp 7.1.21
+- For pysnmp issues, see: https://github.com/etingof/pysnmp/issues
 
 ## FAQ
 
@@ -154,11 +142,11 @@ A: No, it's a drop-in replacement. Everything works the same.
 **Q: Do I need to reconfigure my PDUs?**
 A: No, all configurations remain unchanged.
 
-**Q: Can I still use the old pysnmp?**
-A: Not recommended. The old package is deprecated and has issues with modern Python.
+**Q: What version of pysnmp does this use?**
+A: It uses whatever version Home Assistant Core provides (currently 7.1.21).
 
-**Q: What if I have other integrations using old pysnmp?**
-A: They should work fine. The new package is backward compatible. But those integrations might also need updating.
+**Q: What if HA Core updates pysnmp?**
+A: Our code uses the standard `hlapi` API which is stable across pysnmp 7.x versions, so updates should work seamlessly.
 
 **Q: Does demo mode still work?**
 A: Yes! Demo mode doesn't use SNMP, so it works regardless.

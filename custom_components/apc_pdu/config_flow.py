@@ -58,13 +58,20 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             )
     
     # Test connection by getting device info
-    device_info = await hass.async_add_executor_job(client.get_device_info)
+    try:
+        device_info = await hass.async_add_executor_job(client.get_device_info)
+    except Exception as ex:
+        _LOGGER.error("Failed to get device info: %s", ex)
+        raise CannotConnect(f"Unable to connect to PDU: {ex}") from ex
     
-    if not device_info:
-        raise CannotConnect("Unable to connect to PDU")
+    if not device_info or not device_info.get("model"):
+        raise CannotConnect("Unable to get device information from PDU")
+    
+    # Determine title
+    title = data.get(CONF_NAME) or device_info.get("model") or "APC PDU"
     
     return {
-        "title": data.get(CONF_NAME) or device_info.get("model", "APC PDU"),
+        "title": title,
         "device_info": device_info,
     }
 

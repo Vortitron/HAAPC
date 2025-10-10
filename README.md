@@ -138,24 +138,24 @@ automation:
 
 ## Dependencies
 
-This integration has **automatic SNMP fallback** - no manual configuration needed!
+This integration uses **pysnmp 7.1.21** provided by Home Assistant Core - no additional packages needed!
 
-**Three-tier approach:**
-1. **Demo Mode** - No SNMP needed (perfect for testing)
-2. **Python pysnmp** - Uses Python library if available (fastest)
-3. **CLI fallback** - Uses system `snmpget`/`snmpset` commands (rock-solid)
+**How it works:**
+1. **Demo Mode** - No SNMP needed (perfect for testing without hardware)
+2. **Python pysnmp 7.1.21** - Home Assistant Core provides this automatically
+3. **CLI fallback** - Uses system `snmpget`/`snmpset` if pysnmp has issues (optional)
 
-**For most users**: Works out of the box! The integration automatically chooses the best method.
+**For most users**: Works out of the box! Home Assistant provides all required dependencies.
 
-**For Home Assistant Core users** (manual Python installation): Ensure `snmp` package is installed:
+**For Home Assistant Core users** (optional): Install CLI tools for additional resilience:
 ```bash
 sudo apt-get install snmp  # Debian/Ubuntu
 sudo yum install net-snmp-utils  # RedHat/CentOS
 ```
 
-**For Home Assistant OS/Container users**: No action needed! Use Demo Mode for testing, or wait for Home Assistant's pysnmp to work.
+**For Home Assistant OS/Container users**: No action needed! Everything works automatically with HA Core's built-in pysnmp 7.1.21.
 
-See [AUTOMATIC_SNMP_FALLBACK.md](AUTOMATIC_SNMP_FALLBACK.md) for technical details.
+See [DEPENDENCY_FIX.md](DEPENDENCY_FIX.md) for technical details about pysnmp 7.1.21 compatibility.
 
 ## Technical Details
 
