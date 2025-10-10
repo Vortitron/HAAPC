@@ -14,6 +14,7 @@ A Home Assistant custom integration for controlling APC AP7920 and compatible PD
 - **Device Information**: Model, serial number, firmware version, hardware version
 - **PDU Status**: Rated voltage, max current, bank load state
 - **Proper Device Grouping**: All entities properly grouped in Home Assistant's device view
+- **Demo Mode**: Test the integration without physical hardware (perfect for cloud servers!)
 
 ## Supported Devices
 
@@ -50,6 +51,7 @@ A Home Assistant custom integration for controlling APC AP7920 and compatible PD
    - **SNMP Community String**: Your SNMP community (default is usually "private" or "5stream")
    - **Device Name** (optional): A friendly name for your PDU
    - **SNMP Version**: Choose v1 or v2c (v1 is default)
+   - **Demo Mode** (optional): Enable to test without real hardware (see [DEMO_MODE.md](DEMO_MODE.md))
 
 ## Entities Created
 
@@ -133,6 +135,15 @@ automation:
         data:
           message: "PDU power consumption is {{ state_attr('switch.apc_pdu_master_switch', 'total_power_w') }}W"
 ```
+
+## Dependencies
+
+This integration uses `pysnmp-lextudio` (the actively maintained fork of pysnmp) for SNMP communication:
+- **Package**: pysnmp-lextudio v5.0.34
+- **Why**: Modern Python compatibility, active maintenance, proper dependencies
+- **Installation**: Automatic via Home Assistant
+
+See [DEPENDENCY_FIX.md](DEPENDENCY_FIX.md) for details about the pysnmp dependency.
 
 ## Technical Details
 

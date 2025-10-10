@@ -4,16 +4,25 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pysnmp.hlapi import (
-    CommunityData,
-    ContextData,
-    ObjectIdentity,
-    ObjectType,
-    SnmpEngine,
-    UdpTransportTarget,
-    getCmd,
-    setCmd,
-)
+# Lazy import to avoid HA 2024.10.x pysnmp dependency issues
+# Only import when actually creating an SNMPClient instance
+try:
+    from pysnmp.hlapi import (
+        CommunityData,
+        ContextData,
+        ObjectIdentity,
+        ObjectType,
+        SnmpEngine,
+        UdpTransportTarget,
+        getCmd,
+        setCmd,
+    )
+    SNMP_AVAILABLE = True
+except ImportError as err:
+    # pysnmp not available or broken dependencies
+    # This happens with HA 2024.10.x due to pyasn1 issues
+    SNMP_AVAILABLE = False
+    _IMPORT_ERROR = str(err)
 
 from .const import (
     BANK_LOAD_STATE,
@@ -43,6 +52,14 @@ class SNMPClient:
 
     def __init__(self, host: str, community: str, version: str = "1") -> None:
         """Initialize the SNMP client."""
+        if not SNMP_AVAILABLE:
+            raise ImportError(
+                f"pysnmp is not available or has broken dependencies. "
+                f"Error: {_IMPORT_ERROR}. "
+                f"This is a known issue with Home Assistant 2024.10.x. "
+                f"Please use Demo Mode or see INSTALL_TROUBLESHOOTING.md"
+            )
+        
         self.host = host
         self.community = community
         self.version = 0 if version == "1" else 1  # 0 = v1, 1 = v2c
@@ -77,7 +94,10 @@ class SNMPClient:
                     # Convert to string if it's a DisplayString or similar
                     if hasattr(value, 'prettyPrint'):
                         return value.prettyPrint()
-                    return int(value) if value.isdigit() if isinstance(value, str) else value
+                    # Convert to int if it's a numeric string
+                    if isinstance(value, str) and value.isdigit():
+                        return int(value)
+                    return value
                     
         except Exception as ex:
             _LOGGER.debug("SNMP get exception for OID %s: %s", oid, ex)

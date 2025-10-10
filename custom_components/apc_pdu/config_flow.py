@@ -14,11 +14,13 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import (
     CONF_COMMUNITY,
+    CONF_DEMO_MODE,
     CONF_NAME,
     CONF_SNMP_VERSION,
     DEFAULT_SNMP_VERSION,
     DOMAIN,
 )
+from .demo_client import DemoSNMPClient
 from .snmp_client import SNMPClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,11 +28,26 @@ _LOGGER = logging.getLogger(__name__)
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
-    client = SNMPClient(
-        host=data[CONF_HOST],
-        community=data[CONF_COMMUNITY],
-        version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-    )
+    # Use demo client if demo mode is enabled
+    if data.get(CONF_DEMO_MODE, False):
+        client = DemoSNMPClient(
+            host=data[CONF_HOST],
+            community=data[CONF_COMMUNITY],
+            version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+        )
+    else:
+        try:
+            client = SNMPClient(
+                host=data[CONF_HOST],
+                community=data[CONF_COMMUNITY],
+                version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+            )
+        except ImportError as err:
+            # pysnmp not available - likely HA 2024.10.x issue
+            raise CannotConnect(
+                f"SNMP libraries not available. This is a known issue with Home Assistant 2024.10.x. "
+                f"Please enable Demo Mode to test, or see FIX_HA_2024_10_SNMP.md for solutions. Error: {err}"
+            ) from err
     
     # Test connection by getting device info
     device_info = await hass.async_add_executor_job(client.get_device_info)
@@ -85,6 +102,7 @@ class APCPDUConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SNMP_VERSION, default=DEFAULT_SNMP_VERSION): vol.In(
                     ["1", "2c"]
                 ),
+                vol.Optional(CONF_DEMO_MODE, default=False): bool,
             }
         )
 

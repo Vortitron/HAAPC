@@ -7,6 +7,7 @@ CONF_HOST = "host"
 CONF_COMMUNITY = "community"
 CONF_NAME = "name"
 CONF_SNMP_VERSION = "snmp_version"
+CONF_DEMO_MODE = "demo_mode"
 
 # Default values
 DEFAULT_SNMP_VERSION = "1"

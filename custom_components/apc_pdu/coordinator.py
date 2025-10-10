@@ -12,11 +12,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_COMMUNITY,
+    CONF_DEMO_MODE,
     CONF_SNMP_VERSION,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SNMP_VERSION,
     DOMAIN,
 )
+from .demo_client import DemoSNMPClient
 from .snmp_client import SNMPClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,11 +30,20 @@ class APCPDUDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize."""
         self.entry = entry
-        self.client = SNMPClient(
-            host=entry.data[CONF_HOST],
-            community=entry.data[CONF_COMMUNITY],
-            version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-        )
+        
+        # Use demo client if demo mode is enabled
+        if entry.data.get(CONF_DEMO_MODE, False):
+            self.client = DemoSNMPClient(
+                host=entry.data[CONF_HOST],
+                community=entry.data[CONF_COMMUNITY],
+                version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+            )
+        else:
+            self.client = SNMPClient(
+                host=entry.data[CONF_HOST],
+                community=entry.data[CONF_COMMUNITY],
+                version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+            )
         
         super().__init__(
             hass,

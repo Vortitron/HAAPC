@@ -8,7 +8,8 @@
           "host": "IP Address",
           "community": "SNMP Community String",
           "name": "Device Name (optional)",
-          "snmp_version": "SNMP Version"
+          "snmp_version": "SNMP Version",
+          "demo_mode": "Demo Mode (for testing without hardware)"
         }
       }
     },
