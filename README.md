@@ -138,12 +138,24 @@ automation:
 
 ## Dependencies
 
-This integration uses `pysnmp-lextudio` (the actively maintained fork of pysnmp) for SNMP communication:
-- **Package**: pysnmp-lextudio v5.0.34
-- **Why**: Modern Python compatibility, active maintenance, proper dependencies
-- **Installation**: Automatic via Home Assistant
+This integration has **automatic SNMP fallback** - no manual configuration needed!
 
-See [DEPENDENCY_FIX.md](DEPENDENCY_FIX.md) for details about the pysnmp dependency.
+**Three-tier approach:**
+1. **Demo Mode** - No SNMP needed (perfect for testing)
+2. **Python pysnmp** - Uses Python library if available (fastest)
+3. **CLI fallback** - Uses system `snmpget`/`snmpset` commands (rock-solid)
+
+**For most users**: Works out of the box! The integration automatically chooses the best method.
+
+**For Home Assistant Core users** (manual Python installation): Ensure `snmp` package is installed:
+```bash
+sudo apt-get install snmp  # Debian/Ubuntu
+sudo yum install net-snmp-utils  # RedHat/CentOS
+```
+
+**For Home Assistant OS/Container users**: No action needed! Use Demo Mode for testing, or wait for Home Assistant's pysnmp to work.
+
+See [AUTOMATIC_SNMP_FALLBACK.md](AUTOMATIC_SNMP_FALLBACK.md) for technical details.
 
 ## Technical Details
 

@@ -21,6 +21,7 @@ from .const import (
     DOMAIN,
 )
 from .demo_client import DemoSNMPClient
+from .snmp_cli_client import SNMPCLIClient
 from .snmp_client import SNMPClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,18 +37,25 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
         )
     else:
+        # Try pysnmp first, fall back to CLI if unavailable
         try:
             client = SNMPClient(
                 host=data[CONF_HOST],
                 community=data[CONF_COMMUNITY],
                 version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
             )
+            _LOGGER.info("Using pysnmp library for SNMP communication")
         except ImportError as err:
-            # pysnmp not available - likely HA 2024.10.x issue
-            raise CannotConnect(
-                f"SNMP libraries not available. This is a known issue with Home Assistant 2024.10.x. "
-                f"Please enable Demo Mode to test, or see FIX_HA_2024_10_SNMP.md for solutions. Error: {err}"
-            ) from err
+            # pysnmp not available - use CLI fallback
+            _LOGGER.info(
+                "pysnmp not available (%s), using command-line SNMP tools as fallback",
+                err
+            )
+            client = SNMPCLIClient(
+                host=data[CONF_HOST],
+                community=data[CONF_COMMUNITY],
+                version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+            )
     
     # Test connection by getting device info
     device_info = await hass.async_add_executor_job(client.get_device_info)

@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
 )
 from .demo_client import DemoSNMPClient
+from .snmp_cli_client import SNMPCLIClient
 from .snmp_client import SNMPClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,11 +40,22 @@ class APCPDUDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
             )
         else:
-            self.client = SNMPClient(
-                host=entry.data[CONF_HOST],
-                community=entry.data[CONF_COMMUNITY],
-                version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-            )
+            # Try pysnmp first, fall back to CLI if unavailable
+            try:
+                self.client = SNMPClient(
+                    host=entry.data[CONF_HOST],
+                    community=entry.data[CONF_COMMUNITY],
+                    version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+                )
+                _LOGGER.info("Using pysnmp library for SNMP communication")
+            except ImportError:
+                # pysnmp not available - use CLI fallback
+                _LOGGER.info("pysnmp not available, using command-line SNMP tools as fallback")
+                self.client = SNMPCLIClient(
+                    host=entry.data[CONF_HOST],
+                    community=entry.data[CONF_COMMUNITY],
+                    version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+                )
         
         super().__init__(
             hass,
