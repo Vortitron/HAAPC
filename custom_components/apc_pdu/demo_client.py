@@ -81,17 +81,18 @@ class DemoSNMPClient:
             try:
                 _LOGGER.warning("Demo Mode: Trying real SNMP for device info...")
                 real_info = self._real_client.get_device_info()
-                if real_info and real_info.get("model"):
+                # Check if we got valid data (not all None values)
+                if real_info and real_info.get("model") and real_info["model"] is not None:
                     _LOGGER.warning("✅ Demo Mode: Got real device info: %s", real_info)
                     # Add "(Demo Mode)" suffix to model to indicate we're in demo
                     real_info["model"] = f"{real_info['model']} (Demo Mode)"
                     return real_info
                 else:
-                    _LOGGER.warning("⚠️ Demo Mode: Real SNMP returned no data, using simulation")
+                    _LOGGER.warning("⚠️ Demo Mode: Real SNMP returned no valid data (timeouts?), using simulation")
             except Exception as ex:
                 _LOGGER.warning("⚠️ Demo Mode: Real SNMP failed (%s), using simulation", ex)
         
-        _LOGGER.info("Demo Mode: Using simulated device info")
+        _LOGGER.warning("Demo Mode: Using simulated device info")
         return self._device_info.copy()
 
     def get_pdu_status(self) -> dict[str, Any]:
@@ -114,7 +115,8 @@ class DemoSNMPClient:
         if self._real_client:
             try:
                 real_status = self._real_client.get_outlet_status(outlet_num)
-                if real_status and real_status.get("name"):
+                # Check if we got valid data (not all None/empty)
+                if real_status and real_status.get("name") and real_status["name"] is not None:
                     _LOGGER.debug("Demo Mode: Got real outlet %d status", outlet_num)
                     return real_status
             except Exception as ex:

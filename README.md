@@ -73,6 +73,28 @@ For each PDU, the integration creates:
 - **Hardware Version**: Device hardware revision
 - **Firmware Version**: Device firmware version
 
+## How It Works
+
+This integration uses Home Assistant's SNMP infrastructure with a smart multi-tier approach:
+
+1. **pysnmp.hlapi.v3arch.asyncio** (Primary): Uses HA's exact pysnmp import path
+   - Async API wrapped with `asyncio.run()` for sync context
+   - Factory pattern for proper async object creation
+   - Matches HA's SNMP platform architecture
+
+2. **Command-Line Tools** (Fallback): Uses system `snmpget`/`snmpset` if Python fails
+   - For HA Core installations
+   - Not available on HA OS/Container
+
+3. **Demo Mode** (Testing): Simulates a PDU for testing
+   - Tries real SNMP first (if available)
+   - Falls back to simulation on timeout/failure
+   - Perfect for development and testing
+
+**Key insight**: We use the EXACT same pysnmp module path as Home Assistant's SNMP platform. If HA's SNMP integration works, ours will too!
+
+The integration automatically selects the best available method, ensuring it works out-of-the-box on any Home Assistant installation.
+
 ## SNMP Configuration
 
 Your PDU must have SNMP enabled. Typical SNMP settings:

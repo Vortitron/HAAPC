@@ -46,7 +46,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
         )
     else:
-        # Try pysnmp first, fall back to CLI if unavailable
+        # Try pysnmp first (if HA's SNMP works, this should too!)
+        # Then fall back to CLI if unavailable
         try:
             _LOGGER.warning("Attempting to use pysnmp library...")
             client = SNMPClient(

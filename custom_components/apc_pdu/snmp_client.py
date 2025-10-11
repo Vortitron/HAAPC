@@ -4,25 +4,63 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-# Lazy import to avoid HA 2024.10.x pysnmp dependency issues
-# Only import when actually creating an SNMPClient instance
+# Use the EXACT same pysnmp import path as Home Assistant's SNMP integration
+# HA uses pysnmp.hlapi.v3arch.asyncio - we'll use it too and run in executor
+_IMPORT_ERROR = ""
+_IS_ASYNC = False
 try:
-    from pysnmp.hlapi import (
+    # Try the exact path HA uses (asyncio version)
+    from pysnmp.hlapi.v3arch.asyncio import (
         CommunityData,
         ContextData,
         ObjectIdentity,
         ObjectType,
         SnmpEngine,
         UdpTransportTarget,
-        getCmd,
-        setCmd,
+        get_cmd,
+        set_cmd,
     )
     SNMP_AVAILABLE = True
+    _IMPORT_SOURCE = "pysnmp.hlapi.v3arch.asyncio"
+    _IS_ASYNC = True
 except ImportError as err:
-    # pysnmp not available or broken dependencies
-    # This happens with HA 2024.10.x due to pyasn1 issues
-    SNMP_AVAILABLE = False
-    _IMPORT_ERROR = str(err)
+    # Try sync version
+    try:
+        from pysnmp.hlapi.v3arch.sync import (
+            CommunityData,
+            ContextData,
+            ObjectIdentity,
+            ObjectType,
+            SnmpEngine,
+            UdpTransportTarget,
+            getCmd,
+            setCmd,
+        )
+        SNMP_AVAILABLE = True
+        _IMPORT_SOURCE = "pysnmp.hlapi.v3arch.sync"
+        _IS_ASYNC = False
+    except ImportError as err2:
+        # Try the old import path as last resort
+        try:
+            from pysnmp.hlapi import (
+                CommunityData,
+                ContextData,
+                ObjectIdentity,
+                ObjectType,
+                SnmpEngine,
+                UdpTransportTarget,
+                getCmd,
+                setCmd,
+            )
+            SNMP_AVAILABLE = True
+            _IMPORT_SOURCE = "pysnmp.hlapi"
+            _IS_ASYNC = False
+        except ImportError as err3:
+            # pysnmp not available or broken dependencies
+            SNMP_AVAILABLE = False
+            _IMPORT_SOURCE = "none"
+            _IS_ASYNC = False
+            _IMPORT_ERROR = f"v3arch.asyncio: {err}, v3arch.sync: {err2}, hlapi: {err3}"
 
 from .const import (
     BANK_LOAD_STATE,
@@ -45,6 +83,12 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Log which import source we're using
+if SNMP_AVAILABLE:
+    _LOGGER.info("✅ Successfully imported pysnmp from: %s (async=%s)", _IMPORT_SOURCE, _IS_ASYNC)
+else:
+    _LOGGER.error("❌ Failed to import pysnmp: %s", _IMPORT_ERROR)
 
 
 class SNMPClient:
@@ -76,6 +120,12 @@ class SNMPClient:
             _LOGGER.info("SNMP GET: %s from %s (community: %s***, version: %s)", 
                         oid, self.host, self.community[:2], self.version)
             
+            if _IS_ASYNC:
+                # Use async version
+                import asyncio
+                return asyncio.run(self._snmp_get_async(oid))
+            
+            # Use sync version
             iterator = getCmd(
                 SnmpEngine(),
                 CommunityData(self.community, mpModel=self.version),
@@ -115,9 +165,59 @@ class SNMPClient:
             _LOGGER.error("SNMP get exception for OID %s: %s (type: %s)", oid, ex, type(ex).__name__, exc_info=True)
             return None
 
+    async def _snmp_get_async(self, oid: str) -> Any:
+        """Get a single SNMP value using async API."""
+        try:
+            # Async API requires calling .create() to construct target
+            target = await UdpTransportTarget.create((self.host, self.port))
+            target.timeout = 5
+            target.retries = 2
+            
+            error_indication, error_status, error_index, var_binds = await get_cmd(
+                SnmpEngine(),
+                CommunityData(self.community, mpModel=self.version),
+                target,
+                ContextData(),
+                ObjectType(ObjectIdentity(oid)),
+            )
+            
+            if error_indication:
+                _LOGGER.error("SNMP error indication for OID %s: %s", oid, error_indication)
+                return None
+            elif error_status:
+                _LOGGER.error(
+                    "SNMP error status for OID %s: %s at %s",
+                    oid,
+                    error_status.prettyPrint(),
+                    error_index and var_binds[int(error_index) - 1][0] or "?",
+                )
+                return None
+            else:
+                for var_bind in var_binds:
+                    value = var_bind[1]
+                    # Convert to string if it's a DisplayString or similar
+                    if hasattr(value, 'prettyPrint'):
+                        result = value.prettyPrint()
+                    # Convert to int if it's a numeric string
+                    elif isinstance(value, str) and value.isdigit():
+                        result = int(value)
+                    else:
+                        result = value
+                    _LOGGER.info("SNMP GET (async) result for %s: %s (type: %s)", oid, result, type(result).__name__)
+                    return result
+        except Exception as ex:
+            _LOGGER.error("SNMP get (async) exception for OID %s: %s", oid, ex, exc_info=True)
+            return None
+
     def _snmp_set(self, oid: str, value: int) -> bool:
         """Set a single SNMP value."""
         try:
+            if _IS_ASYNC:
+                # Use async version
+                import asyncio
+                return asyncio.run(self._snmp_set_async(oid, value))
+            
+            # Use sync version
             from pysnmp.hlapi import Integer
 
             iterator = setCmd(
@@ -139,6 +239,34 @@ class SNMPClient:
             
         except Exception as ex:
             _LOGGER.error("SNMP set exception for OID %s: %s", oid, ex)
+            return False
+
+    async def _snmp_set_async(self, oid: str, value: int) -> bool:
+        """Set a single SNMP value using async API."""
+        try:
+            from pysnmp.proto.rfc1902 import Integer
+            
+            # Async API requires calling .create() to construct target
+            target = await UdpTransportTarget.create((self.host, self.port))
+            target.timeout = 5
+            target.retries = 2
+            
+            error_indication, error_status, error_index, var_binds = await set_cmd(
+                SnmpEngine(),
+                CommunityData(self.community, mpModel=self.version),
+                target,
+                ContextData(),
+                ObjectType(ObjectIdentity(oid), Integer(value)),
+            )
+            
+            if error_indication or error_status:
+                _LOGGER.error(
+                    "SNMP set (async) failed: %s %s", error_indication, error_status
+                )
+                return False
+            return True
+        except Exception as ex:
+            _LOGGER.error("SNMP set (async) exception for OID %s: %s", oid, ex, exc_info=True)
             return False
 
     def get_device_info(self) -> dict[str, Any]:
