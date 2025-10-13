@@ -29,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
-    _LOGGER.warning(
+    _LOGGER.debug(
         "=== APC PDU Connection Attempt === Host: %s, Community: %s, Version: %s, Demo: %s",
         data[CONF_HOST],
         data[CONF_COMMUNITY][:3] + "***",  # Partially hide community string
@@ -39,7 +39,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     
     # Use demo client if demo mode is enabled
     if data.get(CONF_DEMO_MODE, False):
-        _LOGGER.warning("Using Demo Mode (simulated PDU)")
+        _LOGGER.info("Using Demo Mode (simulated PDU)")
         client = DemoSNMPClient(
             host=data[CONF_HOST],
             community=data[CONF_COMMUNITY],
@@ -49,16 +49,16 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # Try pysnmp first (if HA's SNMP works, this should too!)
         # Then fall back to CLI if unavailable
         try:
-            _LOGGER.warning("Attempting to use pysnmp library...")
+            _LOGGER.debug("Attempting to use pysnmp library...")
             client = SNMPClient(
                 host=data[CONF_HOST],
                 community=data[CONF_COMMUNITY],
                 version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
             )
-            _LOGGER.warning("✅ Successfully initialized pysnmp client")
+            _LOGGER.info("✅ Successfully initialized pysnmp client")
         except ImportError as err:
             # pysnmp not available - try CLI fallback
-            _LOGGER.warning(
+            _LOGGER.info(
                 "⚠️ pysnmp not available (%s), trying command-line SNMP tools as fallback",
                 err
             )
@@ -68,7 +68,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                     community=data[CONF_COMMUNITY],
                     version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
                 )
-                _LOGGER.warning("✅ Successfully initialized CLI SNMP client")
+                _LOGGER.info("✅ Successfully initialized CLI SNMP client")
             except ImportError as cli_err:
                 # CLI tools also not available
                 _LOGGER.error(
@@ -83,10 +83,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                 ) from cli_err
     
     # Test connection by getting device info
-    _LOGGER.warning("Testing connection by retrieving device info...")
+    _LOGGER.debug("Testing connection by retrieving device info...")
     try:
         device_info = await hass.async_add_executor_job(client.get_device_info)
-        _LOGGER.warning("Device info retrieved: %s", device_info)
+        _LOGGER.debug("Device info retrieved: %s", device_info)
     except Exception as ex:
         _LOGGER.error("❌ Failed to get device info: %s (type: %s)", ex, type(ex).__name__, exc_info=True)
         raise CannotConnect(f"Unable to connect to PDU: {ex}") from ex
@@ -101,7 +101,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     
     # Determine title
     title = data.get(CONF_NAME) or device_info.get("model") or "APC PDU"
-    _LOGGER.warning("✅ Connection successful! Title: %s", title)
+    _LOGGER.info("✅ Connection successful! Title: %s", title)
     
     return {
         "title": title,

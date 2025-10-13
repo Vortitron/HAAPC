@@ -37,20 +37,20 @@ class DemoSNMPClient:
         
         # Try to initialize real SNMP client if requested
         if try_real_snmp:
-            _LOGGER.warning("Demo Mode: Attempting to use real SNMP first...")
+            _LOGGER.debug("Demo Mode: Attempting to use real SNMP first...")
             try:
                 # Try importing and initializing real SNMP client
                 from .snmp_client import SNMPClient, SNMP_AVAILABLE
                 
                 if SNMP_AVAILABLE:
                     self._real_client = SNMPClient(host, community, version)
-                    _LOGGER.warning("✅ Demo Mode: Real SNMP client available, will try real PDU first")
+                    _LOGGER.info("✅ Demo Mode: Real SNMP client available, will try real PDU first")
                 else:
-                    _LOGGER.warning("⚠️ Demo Mode: pysnmp not available, using pure simulation")
+                    _LOGGER.info("⚠️ Demo Mode: pysnmp not available, using pure simulation")
             except Exception as ex:
-                _LOGGER.warning("⚠️ Demo Mode: Cannot use real SNMP (%s), using pure simulation", ex)
+                _LOGGER.info("⚠️ Demo Mode: Cannot use real SNMP (%s), using pure simulation", ex)
         else:
-            _LOGGER.warning("Demo Mode: Pure simulation (not trying real SNMP)")
+            _LOGGER.debug("Demo Mode: Pure simulation (not trying real SNMP)")
         
         # Simulated outlet states (all start as off)
         self._outlet_states = {i: False for i in range(1, 9)}
@@ -65,7 +65,7 @@ class DemoSNMPClient:
             "outlet_count": 8,
         }
         
-        _LOGGER.warning("Demo SNMP client initialized for %s (real_snmp=%s)", host, try_real_snmp)
+        _LOGGER.debug("Demo SNMP client initialized for %s (real_snmp=%s)", host, try_real_snmp)
 
     def _snmp_get(self, oid: str) -> Any:
         """Simulate SNMP get - not used in demo mode."""
@@ -79,20 +79,20 @@ class DemoSNMPClient:
         """Get device information - try real SNMP first, fallback to simulated."""
         if self._real_client:
             try:
-                _LOGGER.warning("Demo Mode: Trying real SNMP for device info...")
+                _LOGGER.debug("Demo Mode: Trying real SNMP for device info...")
                 real_info = self._real_client.get_device_info()
                 # Check if we got valid data (not all None values)
                 if real_info and real_info.get("model") and real_info["model"] is not None:
-                    _LOGGER.warning("✅ Demo Mode: Got real device info: %s", real_info)
+                    _LOGGER.info("✅ Demo Mode: Got real device info: %s", real_info)
                     # Add "(Demo Mode)" suffix to model to indicate we're in demo
                     real_info["model"] = f"{real_info['model']} (Demo Mode)"
                     return real_info
                 else:
-                    _LOGGER.warning("⚠️ Demo Mode: Real SNMP returned no valid data (timeouts?), using simulation")
+                    _LOGGER.info("⚠️ Demo Mode: Real SNMP returned no valid data (timeouts?), using simulation")
             except Exception as ex:
-                _LOGGER.warning("⚠️ Demo Mode: Real SNMP failed (%s), using simulation", ex)
+                _LOGGER.info("⚠️ Demo Mode: Real SNMP failed (%s), using simulation", ex)
         
-        _LOGGER.warning("Demo Mode: Using simulated device info")
+        _LOGGER.debug("Demo Mode: Using simulated device info")
         return self._device_info.copy()
 
     def get_pdu_status(self) -> dict[str, Any]:
@@ -170,17 +170,17 @@ class DemoSNMPClient:
         """Set outlet state - try real SNMP first, fallback to simulated."""
         if self._real_client:
             try:
-                _LOGGER.warning("Demo Mode: Trying real SNMP to set outlet %d to %s", outlet_num, "ON" if state else "OFF")
+                _LOGGER.debug("Demo Mode: Trying real SNMP to set outlet %d to %s", outlet_num, "ON" if state else "OFF")
                 result = self._real_client.set_outlet(outlet_num, state)
                 if result:
-                    _LOGGER.warning("✅ Demo Mode: Successfully set outlet %d on real PDU", outlet_num)
+                    _LOGGER.info("✅ Demo Mode: Successfully set outlet %d on real PDU", outlet_num)
                     # Also update our simulated state
                     self._outlet_states[outlet_num] = state
                     return True
                 else:
-                    _LOGGER.warning("⚠️ Demo Mode: Real SNMP set failed, using simulation")
+                    _LOGGER.info("⚠️ Demo Mode: Real SNMP set failed, using simulation")
             except Exception as ex:
-                _LOGGER.warning("⚠️ Demo Mode: Real SNMP set failed (%s), using simulation", ex)
+                _LOGGER.info("⚠️ Demo Mode: Real SNMP set failed (%s), using simulation", ex)
         
         # Simulate the operation
         _LOGGER.info("Demo: Simulating outlet %d set to %s", outlet_num, "ON" if state else "OFF")

@@ -2,25 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.0] - 2025-10-11
+## [1.0.0] - 2025-10-13
 
-### 🎉 Production Release
+### 🎉 Production Release - WORKING!
 
 **SNMP Communication Working!**
 - Successfully imports and uses `pysnmp.hlapi.v3arch.asyncio` (HA's exact path)
 - Async API properly wrapped with factory pattern
 - Comprehensive timeout handling
 - Demo Mode gracefully falls back to simulation
+- **TESTED ON REAL HARDWARE** - AP7920 PDU successfully controlled!
 
 ### Fixed
 - Demo Mode now handles SNMP timeouts gracefully
 - Falls back to simulation when PDU unreachable
 - Better validation of SNMP return values (checks for None)
+- **Reduced log spam** - Changed operational logs from WARNING to DEBUG
+  - Normal operations now use DEBUG level (quiet by default)
+  - Important events remain at INFO level
+  - Errors always visible at ERROR level
+
+### Log Levels
+- **DEBUG**: SNMP operations, device info retrieval, normal operations
+- **INFO**: Setup success, client initialization, connection status
+- **ERROR**: SNMP errors, timeouts, connection failures
 
 ### Ready For
-- ✅ Production testing on real PDU
-- ✅ Real-world deployment
+- ✅ Production use (tested on real PDU)
 - ✅ Community release
+- ✅ HACS publication
 
 ## [0.1.6] - 2025-10-11
 

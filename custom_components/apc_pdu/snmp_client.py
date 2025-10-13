@@ -109,7 +109,7 @@ class SNMPClient:
         self.version = 0 if version == "1" else 1  # 0 = v1, 1 = v2c
         self.port = 161
         
-        _LOGGER.warning(
+        _LOGGER.debug(
             "SNMPClient initialized: host=%s, version=%s (mpModel=%d), port=%d",
             host, version, self.version, self.port
         )
@@ -117,7 +117,7 @@ class SNMPClient:
     def _snmp_get(self, oid: str) -> Any:
         """Get a single SNMP value."""
         try:
-            _LOGGER.info("SNMP GET: %s from %s (community: %s***, version: %s)", 
+            _LOGGER.debug("SNMP GET: %s from %s (community: %s***, version: %s)", 
                         oid, self.host, self.community[:2], self.version)
             
             if _IS_ASYNC:
@@ -158,7 +158,7 @@ class SNMPClient:
                         result = int(value)
                     else:
                         result = value
-                    _LOGGER.info("SNMP GET result for %s: %s (type: %s)", oid, result, type(result).__name__)
+                    _LOGGER.debug("SNMP GET result for %s: %s (type: %s)", oid, result, type(result).__name__)
                     return result
                     
         except Exception as ex:
@@ -203,7 +203,7 @@ class SNMPClient:
                         result = int(value)
                     else:
                         result = value
-                    _LOGGER.info("SNMP GET (async) result for %s: %s (type: %s)", oid, result, type(result).__name__)
+                    _LOGGER.debug("SNMP GET (async) result for %s: %s (type: %s)", oid, result, type(result).__name__)
                     return result
         except Exception as ex:
             _LOGGER.error("SNMP get (async) exception for OID %s: %s", oid, ex, exc_info=True)
@@ -271,7 +271,7 @@ class SNMPClient:
 
     def get_device_info(self) -> dict[str, Any]:
         """Get device information."""
-        _LOGGER.warning("Getting device info from %s...", self.host)
+        _LOGGER.debug("Getting device info from %s...", self.host)
         result = {
             "name": self._snmp_get(OID_PDU_NAME),
             "model": self._snmp_get(OID_MODEL),
@@ -280,7 +280,7 @@ class SNMPClient:
             "hardware": self._snmp_get(OID_HARDWARE_REV),
             "outlet_count": self._snmp_get(OID_OUTLET_COUNT),
         }
-        _LOGGER.warning("Device info result: %s", result)
+        _LOGGER.debug("Device info result: %s", result)
         return result
 
     def get_pdu_status(self) -> dict[str, Any]:
