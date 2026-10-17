@@ -4,15 +4,49 @@ on:
   push:
   pull_request:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 * * 0"
 
 jobs:
-  validate:
+  hassfest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: HACS validation
         uses: hacs/action@main
         with:
           category: integration
 
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported Home Assistant (hacs.json). Its pinned aiohttp was
+          # later yanked from PyPI, so it has to be requested explicitly.
+          - name: minimum (2025.3)
+            python: "3.13"
+            packages: pytest-homeassistant-custom-component==0.13.221 aiohttp==3.11.13
+          - name: latest
+            python: "3.14"
+            packages: pytest-homeassistant-custom-component
+    name: tests (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test dependencies
+        # Pulls in Home Assistant core so the integration tests run against the real thing
+        run: pip install ${{ matrix.packages }}
+      - name: Install the pysnmp version this Home Assistant release ships
+        run: |
+          pip install "$(python -c 'import json, pathlib, homeassistant; print(json.loads((pathlib.Path(homeassistant.__file__).parent / "components/snmp/manifest.json").read_text())["requirements"][0])')"
+      - name: Run tests
+        run: pytest tests -q

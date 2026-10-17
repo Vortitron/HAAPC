@@ -1,208 +1,209 @@
-# APC PDU Integration for Home Assistant
+# APC PDU for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![HACS](https://img.shields.io/badge/HACS-Integration-41BDF5.svg)](https://hacs.xyz)
+[![Validate](https://github.com/Vortitron/HAAPC/actions/workflows/validate.yml/badge.svg)](https://github.com/Vortitron/HAAPC/actions/workflows/validate.yml)
 
-A Home Assistant custom integration for controlling APC AP7920 and compatible PDUs (Power Distribution Units) via SNMP.
+Control and monitor APC Switched Rack PDUs (AP7920 and the rest of the AP79xx
+family) from Home Assistant over SNMP. Every outlet becomes a switch and the
+PDU's load readings become sensors, all grouped under one device.
 
-## Features
+## Supported devices
 
-- **Easy Setup**: Add PDUs via the Home Assistant UI with just IP address and SNMP community string
-- **Complete Device Integration**: All outlets grouped under a single device
-- **Individual Outlet Control**: Each outlet appears as a switch entity
-- **Master Switch**: Control all outlets at once
-- **Power Monitoring**: Real-time power consumption per outlet (if supported by your PDU)
-- **Device Information**: Model, serial number, firmware version, hardware version
-- **PDU Status**: Rated voltage, max current, bank load state
-- **Proper Device Grouping**: All entities properly grouped in Home Assistant's device view
-- **Demo Mode**: Test the integration without physical hardware (perfect for cloud servers!)
+APC rack PDUs that implement the `rPDU` branch of the APC PowerNet MIB
+(`.1.3.6.1.4.1.318.1.1.12`), which is the first-generation Switched Rack PDU
+range (AP79xx). It has been used with an AP7920; other AP79xx models use the
+same MIB and are expected to work. PDUs that only implement the newer `rPDU2`
+branch (for example many AP8xxx models) are not supported yet; setup reports
+that the device does not provide the APC rPDU MIB.
 
-## Supported Devices
-
-- APC AP7920 (tested)
-- APC AP79xx series with rPDU2 MIB support
-- Other APC PDUs with SNMP support (may require minor adjustments)
+SNMPv1, SNMPv2c and SNMPv3 are supported.
 
 ## Installation
 
-### HACS (Recommended)
+### HACS
 
-1. Open HACS in Home Assistant
-2. Click on "Integrations"
-3. Click the three dots in the top right corner
-4. Select "Custom repositories"
-5. Add this repository URL: `https://github.com/vortitron/HAAPC`
-6. Select category: "Integration"
-7. Click "Add"
-8. Find "APC PDU" in the integration list and install it
-9. Restart Home Assistant
+Search for **APC PDU** in HACS, download it and restart Home Assistant.
 
-### Manual Installation
+If it is not listed yet, add `https://github.com/Vortitron/HAAPC` as a custom
+repository of type *Integration* first.
 
-1. Copy the `custom_components/apc_pdu` directory to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
+### Manual
+
+Copy `custom_components/apc_pdu` into the `custom_components` folder of your
+Home Assistant configuration and restart Home Assistant.
+
+## Preparing the PDU
+
+In the PDU's web interface (or over telnet/SSH):
+
+1. Enable SNMP (*Administration > Network > SNMPv1* or *SNMPv3*).
+2. For SNMPv1/v2c, set up a community with **Write** access and, ideally, limit
+   it to Home Assistant's IP address. A read-only community shows the outlets but
+   cannot switch them.
+3. For SNMPv3, create a user with an authentication passphrase (and a privacy
+   passphrase if you want encryption) and give it write access.
 
 ## Configuration
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration**
-3. Search for "APC PDU"
-4. Enter your PDU details:
-   - **IP Address**: The IP address of your PDU
-   - **SNMP Community String**: Your SNMP community (default is usually "private" or "5stream")
-   - **Device Name** (optional): A friendly name for your PDU
-   - **SNMP Version**: Choose v1 or v2c (v1 is default)
-   - **Demo Mode** (optional): Enable to test without real hardware (see [DEMO_MODE.md](DEMO_MODE.md))
+*Settings > Devices & services > Add integration > APC PDU*
 
-## Entities Created
+| Field | Description |
+| --- | --- |
+| Host | IP address or host name of the PDU |
+| Community | SNMPv1/v2c community; `private` is APC's default write community |
+| SNMP version | SNMPv1 (default), SNMPv2c or SNMPv3 |
+| Port | UDP port, normally 161 |
 
-For each PDU, the integration creates:
+Choosing SNMPv3 opens a second step for the user name, the authentication
+protocol and passphrase, and the privacy protocol and passphrase.
 
-### Switches
-- **Outlet 1-8** (or however many outlets your PDU has): Individual outlet control
-  - Attributes: `outlet_number`, `outlet_name`, `power_w` (if available)
-- **Master Switch**: Control all outlets at once
-  - Attributes: `total_outlets`, `outlets_on`, `total_power_w`, `rated_voltage`, `rated_max_current`, `bank_load_state`
+During setup the integration reads the model, serial number, number of outlets
+and which readings the PDU supports, and names the entry after the PDU.
 
-### Sensors
-- **Outlet X Power**: Power consumption for each outlet (Watts)
-  - Attributes: `outlet_number`, `outlet_name`, `outlet_status`
-- **Rated Voltage**: PDU rated voltage (V)
-- **Rated Max Current**: PDU maximum current (A)
-- **Bank Load State**: Current load state (Low Load, Normal, Near Overload, Overload)
-- **Outlet Count**: Number of outlets
-- **Hardware Version**: Device hardware revision
-- **Firmware Version**: Device firmware version
+- **Options** (*Configure*): polling interval, 10 to 3600 seconds (default 30).
+- **Reconfigure** (entry menu): change the address, community, SNMP version or
+  SNMPv3 credentials. Pointing an entry at a different PDU is refused.
 
-## How It Works
+## Entities
 
-This integration uses Home Assistant's SNMP infrastructure with a smart multi-tier approach:
+| Entity | Notes |
+| --- | --- |
+| One switch per outlet | Named after the outlet name configured on the PDU |
+| All outlets switch | On while any outlet is on; turning it on/off switches every outlet |
+| Current | Measured load in amps. Banked or multi-phase PDUs get one sensor per phase and bank |
+| Load state | `normal`, `low`, `near_overload` or `overload`, as judged by the PDU's own thresholds |
+| Power | Total watts, only if the PDU reports it |
+| Outlet current | Per-outlet amps, only on outlet-metered PDUs |
+| Rated current, Nominal voltage | Diagnostic values read from the PDU |
 
-1. **pysnmp.hlapi.v3arch.asyncio** (Primary): Uses HA's exact pysnmp import path
-   - Async API wrapped with `asyncio.run()` for sync context
-   - Factory pattern for proper async object creation
-   - Matches HA's SNMP platform architecture
+Readings the PDU does not provide are not created at all, so no sensor shows a
+made-up value.
 
-2. **Command-Line Tools** (Fallback): Uses system `snmpget`/`snmpset` if Python fails
-   - For HA Core installations
-   - Not available on HA OS/Container
+> **Careful with the all-outlets switch.** If Home Assistant itself, its network
+> switch or router is plugged into the PDU, turning it off cuts power to them
+> too. Disable the entity if you do not need it.
 
-3. **Demo Mode** (Testing): Simulates a PDU for testing
-   - Tries real SNMP first (if available)
-   - Falls back to simulation on timeout/failure
-   - Perfect for development and testing
+## Example automations
 
-**Key insight**: We use the EXACT same pysnmp module path as Home Assistant's SNMP platform. If HA's SNMP integration works, ours will too!
+Power-cycle a router every night:
 
-The integration automatically selects the best available method, ensuring it works out-of-the-box on any Home Assistant installation.
+```yaml
+automation:
+  - alias: "Reboot router nightly"
+    triggers:
+      - trigger: time
+        at: "03:00:00"
+    actions:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.rack_a_router
+      - delay: "00:00:30"
+      - action: switch.turn_on
+        target:
+          entity_id: switch.rack_a_router
+```
 
-## SNMP Configuration
+Warn when the PDU approaches overload:
 
-Your PDU must have SNMP enabled. Typical SNMP settings:
-- **Version**: SNMPv1 or SNMPv2c
-- **Community String**: Usually "private" (read-write) or "public" (read-only - won't allow control)
-- **Port**: 161 (default)
+```yaml
+automation:
+  - alias: "PDU near overload"
+    triggers:
+      - trigger: state
+        entity_id: sensor.rack_a_load_state
+        to: ["near_overload", "overload"]
+    actions:
+      - action: notify.notify
+        data:
+          message: "PDU load is {{ states('sensor.rack_a_current') }} A ({{ trigger.to_state.state }})"
+```
 
-To configure SNMP on your APC PDU:
-1. Access the PDU web interface or telnet/SSH
-2. Navigate to Network → SNMP settings
-3. Enable SNMP and set your community string
-4. Ensure read-write access is granted
+Stagger start-up to avoid an inrush spike:
+
+```yaml
+script:
+  pdu_staggered_start:
+    sequence:
+      - repeat:
+          for_each:
+            - switch.rack_a_outlet_1
+            - switch.rack_a_outlet_2
+            - switch.rack_a_outlet_3
+          sequence:
+            - action: switch.turn_on
+              target:
+                entity_id: "{{ repeat.item }}"
+            - delay: 5
+```
+
+Entity IDs depend on your PDU and outlet names; check yours under the device.
 
 ## Troubleshooting
 
-### Connection Issues
-- Verify the PDU IP address is correct and reachable
-- Check that SNMP is enabled on the PDU
-- Ensure the community string is correct
-- Verify the SNMP version matches (v1 or v2c)
-- Check firewall rules allow SNMP traffic (UDP port 161)
+**"No answer from the PDU"**: a PDU silently ignores requests with a wrong
+community, so a wrong community looks exactly like an unreachable PDU. Check the
+address, the SNMP version and the community, and that the PDU's SNMP access list
+allows Home Assistant's IP. From a machine with net-snmp installed:
 
-### No Power Readings
-- Some PDU models don't support per-outlet power monitoring
-- Verify your PDU model supports the rPDU2 MIB
-- Check if outlets are actually drawing power
-- Test with: `snmpwalk -v1 -c <community> <ip> .1.3.6.1.4.1.318.1.1.12.3.5.1.1.7`
-
-### Outlets Not Controllable
-- Ensure your SNMP community has write permissions
-- Some PDUs require specific configuration to enable outlet control
-- Check PDU settings for outlet control permissions
-
-## Example Automations
-
-### Turn on all outlets at sunrise
-```yaml
-automation:
-  - alias: "PDU All On at Sunrise"
-    trigger:
-      - platform: sun
-        event: sunrise
-    action:
-      - service: switch.turn_on
-        target:
-          entity_id: switch.apc_pdu_master_switch
-```
-
-### Alert on high power consumption
-```yaml
-automation:
-  - alias: "PDU High Power Alert"
-    trigger:
-      - platform: numeric_state
-        entity_id: switch.apc_pdu_master_switch
-        attribute: total_power_w
-        above: 1000
-    action:
-      - service: notify.notify
-        data:
-          message: "PDU power consumption is {{ state_attr('switch.apc_pdu_master_switch', 'total_power_w') }}W"
-```
-
-## Dependencies
-
-This integration uses **pysnmp 7.1.21** provided by Home Assistant Core - no additional packages needed!
-
-**How it works:**
-1. **Demo Mode** - No SNMP needed (perfect for testing without hardware)
-2. **Python pysnmp 7.1.21** - Home Assistant Core provides this automatically
-3. **CLI fallback** - Uses system `snmpget`/`snmpset` if pysnmp has issues (optional)
-
-**For most users**: Works out of the box! Home Assistant provides all required dependencies.
-
-**For Home Assistant Core users** (optional): Install CLI tools for additional resilience:
 ```bash
-sudo apt-get install snmp  # Debian/Ubuntu
-sudo yum install net-snmp-utils  # RedHat/CentOS
+snmpget -v1 -c <community> <pdu-ip> .1.3.6.1.4.1.318.1.1.12.1.5.0   # model, e.g. "AP7920"
+snmpget -v1 -c <community> <pdu-ip> .1.3.6.1.4.1.318.1.1.12.3.5.1.1.4.1   # outlet 1: 1 = on, 2 = off
 ```
 
-**For Home Assistant OS/Container users**: No action needed! Everything works automatically with HA Core's built-in pysnmp 7.1.21.
+**Outlets show but cannot be switched**: the community or SNMPv3 user has no
+write access. Home Assistant reports "The PDU did not switch ...".
 
-See [DEPENDENCY_FIX.md](DEPENDENCY_FIX.md) for technical details about pysnmp 7.1.21 compatibility.
+**Debug logging**:
 
-## Technical Details
+```yaml
+logger:
+  logs:
+    custom_components.apc_pdu: debug
+```
 
-### SNMP OIDs Used
+### OIDs used
 
-The integration uses the APC rPDU2 MIB (`.1.3.6.1.4.1.318.1.1.12`):
+All under `.1.3.6.1.4.1.318.1.1.12` (PowerNet-MIB `rPDU`):
 
-- Device Info: `.1.1.0` - `.1.8.0`
-- PDU Status: `.2.x.x.x`
-- Outlet Control: `.3.3.1.1.4.X` (X = outlet number)
-- Outlet Status: `.3.5.1.1.4.X`
-- Outlet Power: `.3.5.1.1.7.X`
+| OID | Object |
+| --- | --- |
+| `.1.1.0` / `.1.2.0` / `.1.3.0` / `.1.5.0` / `.1.6.0` | name, hardware rev., firmware rev., model, serial |
+| `.1.7.0` | device rating (A) |
+| `.1.8.0` | number of outlets |
+| `.1.15.0` | line voltage setting (V) |
+| `.1.16.0` | power (W), not on every model |
+| `.2.1.2.0` / `.2.1.4.0` | number of phases / banks |
+| `.2.3.1.1.2.N` / `.2.3.1.1.3.N` | phase/bank load (0.1 A) / load state |
+| `.3.1.5.0` | number of monitored outlets |
+| `.3.3.1.1.4.N` | outlet command (1 = on, 2 = off) |
+| `.3.5.1.1.2.N` / `.3.5.1.1.4.N` / `.3.5.1.1.7.N` | outlet name / state / load (0.1 A) |
 
-## Contributing
+## Upgrading from 1.0.x
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- Demo mode has been removed. It fell back to simulated values when the PDU did
+  not answer, so a real installation could show invented readings.
+- Removed sensors: *Outlet count*, *Hardware version* and *Firmware version*
+  (now on the device page), *Rated max current* (it actually showed the power
+  factor setting) and *Outlet N power* (it showed outlet current, in tenths of an
+  amp, as watts). Home Assistant deletes these entities on the first start.
+- New: measured *Current*, *Power* (where supported), per-outlet current on
+  metered PDUs, SNMPv3, a configurable port, reconfiguration and a polling
+  interval option.
+- Outlet switches, the all-outlets switch, *Load state* and *Nominal voltage*
+  (formerly *Rated voltage*) keep their entity IDs. Load state values are now
+  `normal`, `low`, `near_overload` and `overload`; 1.0.x swapped normal and low.
+
+## Development
+
+```bash
+pip install -r requirements_test.txt
+pytest tests
+```
+
+The tests run the config flow and entities against a real Home Assistant core
+with the SNMP client replaced, and run the real SNMP client against a small
+SNMPv1/v2c agent on 127.0.0.1 that answers like an AP7920.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Credits
-
-Developed for use with APC AP7920 PDUs and Home Assistant.
-
-## Support
-
-For issues, questions, or suggestions, please [open an issue](https://github.com/vortitron/HAAPC/issues) on GitHub.
+MIT, see [LICENSE](LICENSE).

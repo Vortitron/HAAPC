@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-10-17
+
+Prepared for the HACS default store. Minimum Home Assistant version: 2025.3.
+
+### Fixed
+- SNMP no longer runs a new event loop and a new SNMP engine for every value
+  (`asyncio.run()` in an executor thread, ~35 engines per poll). The client is
+  now natively async, reuses one engine per PDU, batches requests and creates
+  the engine and transport outside the event loop.
+- "Rated Max Current" read `rPDUIdentDevicePowerFactor` (thousandths), so it
+  showed the power factor setting as amps. Replaced by *Rated current*
+  (`rPDUIdentDeviceRating`).
+- "Outlet N Power" read `rPDUOutletStatusLoad`, which is outlet current in
+  tenths of an amp (outlet-metered models only), and labelled it watts. Replaced
+  by per-outlet *current* sensors that are only created on outlet-metered PDUs.
+- Bank load state mapping had "normal" and "low" swapped.
+- Entities could get unique IDs such as `None_outlet_1` when the PDU reported
+  no serial number.
+- A failed switch command was only logged; it now raises an error in the UI.
+- An outlet the PDU stops reporting now shows as unavailable instead of off.
+- `pysnmp==7.1.21` pin conflicted with the pysnmp version Home Assistant ships
+  (6.2.6 before 2025.8, 7.1.2x after) and fails hassfest. Now `pysnmp>=6.2.6`;
+  both the pysnmp 6 and 7 APIs are supported.
+
+### Removed
+- Demo mode, which silently fell back to simulated values when the PDU did not
+  answer, and the command-line `snmpget` fallback.
+- Sensors that duplicated device information (outlet count, hardware and
+  firmware version); these are shown on the device page. Obsolete entities are
+  removed from the entity registry on first start.
+- Unused `ap7920/` YAML examples and MIB copy, and the status/fix notes in the
+  repository root (useful parts moved to the README).
+
+### Added
+- Measured load *Current* per phase/bank, *Load state* as an enum sensor,
+  total *Power* where the PDU reports it.
+- Outlet switches are named after the outlet names configured on the PDU.
+- SNMPv3 (MD5/SHA-1/SHA-2 authentication, DES/3DES/AES privacy), configurable
+  UDP port, IPv6 addresses.
+- Reconfigure flow, polling interval option, clearer setup errors
+  (no answer, rejected SNMPv3 credentials, not an APC rPDU).
+- Brand icons, HACS/hassfest/pytest CI against the minimum and latest Home
+  Assistant, and tests (including the real SNMP client against a fake agent).
+- Config entries from 1.0.x are migrated automatically.
+
 ## [1.0.0] - 2025-10-13
 
 ### 🎉 Production Release - WORKING!
