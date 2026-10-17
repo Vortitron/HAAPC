@@ -1,87 +1,86 @@
-"""DataUpdateCoordinator for APC PDU."""
+"""Polling coordinator for APC PDU."""
+
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_PORT, CONF_SCAN_INTERVAL, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    AUTH_NONE,
+    CONF_AUTH_KEY,
+    CONF_AUTH_PROTOCOL,
     CONF_COMMUNITY,
-    CONF_DEMO_MODE,
+    CONF_PRIV_KEY,
+    CONF_PRIV_PROTOCOL,
     CONF_SNMP_VERSION,
+    DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SNMP_VERSION,
     DOMAIN,
+    PRIV_NONE,
 )
-from .demo_client import DemoSNMPClient
-from .snmp_cli_client import SNMPCLIClient
-from .snmp_client import SNMPClient
+from .snmp import APCPDUClient, APCPDUError, PDUInfo, PDUStatus, SNMPAuth
 
 _LOGGER = logging.getLogger(__name__)
 
+type APCPDUConfigEntry = ConfigEntry[APCPDUCoordinator]
 
-class APCPDUDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Class to manage fetching APC PDU data."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize."""
-        self.entry = entry
-        
-        # Use demo client if demo mode is enabled
-        if entry.data.get(CONF_DEMO_MODE, False):
-            self.client = DemoSNMPClient(
-                host=entry.data[CONF_HOST],
-                community=entry.data[CONF_COMMUNITY],
-                version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-            )
-        else:
-            # Try pysnmp first, fall back to CLI if unavailable
-            try:
-                self.client = SNMPClient(
-                    host=entry.data[CONF_HOST],
-                    community=entry.data[CONF_COMMUNITY],
-                    version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-                )
-                _LOGGER.info("Using pysnmp library for SNMP communication")
-            except ImportError:
-                # pysnmp not available - use CLI fallback
-                _LOGGER.info("pysnmp not available, using command-line SNMP tools as fallback")
-                self.client = SNMPCLIClient(
-                    host=entry.data[CONF_HOST],
-                    community=entry.data[CONF_COMMUNITY],
-                    version=entry.data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-                )
-        
+def auth_from_data(data: dict[str, Any]) -> SNMPAuth:
+    """Build SNMP credentials from config entry data."""
+    return SNMPAuth(
+        version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+        community=data.get(CONF_COMMUNITY),
+        username=data.get(CONF_USERNAME),
+        auth_protocol=data.get(CONF_AUTH_PROTOCOL, AUTH_NONE),
+        auth_key=data.get(CONF_AUTH_KEY),
+        priv_protocol=data.get(CONF_PRIV_PROTOCOL, PRIV_NONE),
+        priv_key=data.get(CONF_PRIV_KEY),
+    )
+
+
+def client_from_data(data: dict[str, Any]) -> APCPDUClient:
+    """Create a client for config entry (or flow) data."""
+    return APCPDUClient(
+        data[CONF_HOST],
+        auth_from_data(data),
+        port=data.get(CONF_PORT, DEFAULT_PORT),
+    )
+
+
+class APCPDUCoordinator(DataUpdateCoordinator[PDUStatus]):
+    """Polls one PDU."""
+
+    config_entry: APCPDUConfigEntry
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: APCPDUConfigEntry,
+        client: APCPDUClient,
+        info: PDUInfo,
+    ) -> None:
+        """Initialise the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            name=f"{DOMAIN}_{entry.entry_id}",
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            config_entry=entry,
+            name=f"{DOMAIN} {entry.data[CONF_HOST]}",
+            update_interval=timedelta(
+                seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            ),
         )
+        self.client = client
+        self.info = info
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Update data via SNMP."""
+    async def _async_update_data(self) -> PDUStatus:
         try:
-            device_info = await self.hass.async_add_executor_job(
-                self.client.get_device_info
-            )
-            pdu_status = await self.hass.async_add_executor_job(
-                self.client.get_pdu_status
-            )
-            outlets = await self.hass.async_add_executor_job(
-                self.client.get_all_outlets_status
-            )
-            
-            return {
-                "device_info": device_info,
-                "pdu_status": pdu_status,
-                "outlets": outlets,
-            }
-        except Exception as ex:
-            raise UpdateFailed(f"Error communicating with PDU: {ex}") from ex
-
+            return await self.client.async_get_status(self.info)
+        except APCPDUError as err:
+            raise UpdateFailed(f"Error polling PDU {self.client.host}: {err}") from err

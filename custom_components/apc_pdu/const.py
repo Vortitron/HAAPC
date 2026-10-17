@@ -1,68 +1,80 @@
 """Constants for the APC PDU integration."""
 
-DOMAIN = "apc_pdu"
+from __future__ import annotations
 
-# Config entry keys
-CONF_HOST = "host"
-CONF_COMMUNITY = "community"
-CONF_NAME = "name"
-CONF_SNMP_VERSION = "snmp_version"
-CONF_DEMO_MODE = "demo_mode"
+from typing import Final
 
-# Default values
-DEFAULT_SNMP_VERSION = "1"
-DEFAULT_SCAN_INTERVAL = 30
+DOMAIN: Final = "apc_pdu"
+MANUFACTURER: Final = "APC"
 
-# SNMP OIDs - rPDU2 MIB (.1.3.6.1.4.1.318.1.1.12)
-OID_BASE_RPDU2 = ".1.3.6.1.4.1.318.1.1.12"
+# Config entry data keys (host and port use the homeassistant.const names)
+CONF_COMMUNITY: Final = "community"
+CONF_SNMP_VERSION: Final = "snmp_version"
+CONF_AUTH_PROTOCOL: Final = "auth_protocol"
+CONF_AUTH_KEY: Final = "auth_key"
+CONF_PRIV_PROTOCOL: Final = "priv_protocol"
+CONF_PRIV_KEY: Final = "priv_key"
 
-# Device Identification
-OID_PDU_NAME = f"{OID_BASE_RPDU2}.1.1.0"
-OID_HARDWARE_REV = f"{OID_BASE_RPDU2}.1.2.0"
-OID_FIRMWARE_REV = f"{OID_BASE_RPDU2}.1.3.0"
-OID_MODEL = f"{OID_BASE_RPDU2}.1.5.0"
-OID_SERIAL = f"{OID_BASE_RPDU2}.1.6.0"
-OID_OUTLET_COUNT = f"{OID_BASE_RPDU2}.1.8.0"
+SNMP_VERSION_1: Final = "1"
+SNMP_VERSION_2C: Final = "2c"
+SNMP_VERSION_3: Final = "3"
+SNMP_VERSIONS: Final = [SNMP_VERSION_1, SNMP_VERSION_2C, SNMP_VERSION_3]
 
-# PDU Power Info
-OID_RATED_VOLTAGE = f"{OID_BASE_RPDU2}.1.15.0"
-OID_RATED_MAX_CURRENT = f"{OID_BASE_RPDU2}.1.17.0"
-OID_PHASE_COUNT = f"{OID_BASE_RPDU2}.2.1.1.0"
+AUTH_NONE: Final = "none"
+AUTH_PROTOCOLS: Final = [AUTH_NONE, "md5", "sha", "sha224", "sha256", "sha384", "sha512"]
+PRIV_NONE: Final = "none"
+PRIV_PROTOCOLS: Final = [PRIV_NONE, "des", "3des", "aes", "aes192", "aes256"]
 
-# Bank Info
-OID_BANK_LOAD_STATE = f"{OID_BASE_RPDU2}.2.3.1.1.3.1"
+DEFAULT_PORT: Final = 161
+DEFAULT_COMMUNITY: Final = "private"
+DEFAULT_SNMP_VERSION: Final = SNMP_VERSION_1
+DEFAULT_SCAN_INTERVAL: Final = 30
+MIN_SCAN_INTERVAL: Final = 10
+MAX_SCAN_INTERVAL: Final = 3600
 
-# Outlet Control (indexed by outlet number)
-OID_OUTLET_CONTROL = f"{OID_BASE_RPDU2}.3.3.1.1.4"  # .X for outlet X
+# --- APC PowerNet-MIB, rPDU branch (.1.3.6.1.4.1.318.1.1.12) ---
+# Used by Switched Rack PDUs such as the AP79xx series.
+_RPDU: Final = "1.3.6.1.4.1.318.1.1.12"
 
-# Outlet Status (indexed by outlet number)
-OID_OUTLET_NAME = f"{OID_BASE_RPDU2}.3.5.1.1.2"  # .X
-OID_OUTLET_STATUS = f"{OID_BASE_RPDU2}.3.5.1.1.4"  # .X
-OID_OUTLET_POWER = f"{OID_BASE_RPDU2}.3.5.1.1.7"  # .X (Watts)
+# rPDUIdent
+OID_PDU_NAME: Final = f"{_RPDU}.1.1.0"
+OID_HARDWARE_REV: Final = f"{_RPDU}.1.2.0"
+OID_FIRMWARE_REV: Final = f"{_RPDU}.1.3.0"
+OID_MODEL: Final = f"{_RPDU}.1.5.0"
+OID_SERIAL: Final = f"{_RPDU}.1.6.0"
+OID_DEVICE_RATING: Final = f"{_RPDU}.1.7.0"  # amps
+OID_OUTLET_COUNT: Final = f"{_RPDU}.1.8.0"
+OID_LINE_VOLTAGE: Final = f"{_RPDU}.1.15.0"  # configured nominal volts
+OID_POWER_WATTS: Final = f"{_RPDU}.1.16.0"  # not on every model / firmware
 
-# Fallback OIDs - MasterSwitch MIB (.1.3.6.1.4.1.318.1.1.4)
-OID_BASE_MASTERSWITCH = ".1.3.6.1.4.1.318.1.1.4"
-OID_MS_OUTLET_CONTROL = f"{OID_BASE_MASTERSWITCH}.4.2.1.3"  # .X
-OID_MS_OUTLET_NAME = f"{OID_BASE_MASTERSWITCH}.4.2.1.4"  # .X
-OID_MS_OUTLET_STATUS = f"{OID_BASE_MASTERSWITCH}.4.2.1.3"  # .X
-OID_MS_OUTLET_COUNT = f"{OID_BASE_MASTERSWITCH}.4.1.0"
+# rPDULoadDevice
+OID_NUM_PHASES: Final = f"{_RPDU}.2.1.2.0"
+OID_NUM_BANKS: Final = f"{_RPDU}.2.1.4.0"
 
-# SNMP Values
-SNMP_OUTLET_ON = 1
-SNMP_OUTLET_OFF = 2
-SNMP_OUTLET_REBOOT = 3
+# rPDULoadStatusTable, indexed by phase/bank entry (phases first, then banks)
+OID_LOAD_CURRENT: Final = f"{_RPDU}.2.3.1.1.2"  # tenths of amps
+OID_LOAD_STATE: Final = f"{_RPDU}.2.3.1.1.3"
+OID_LOAD_PHASE: Final = f"{_RPDU}.2.3.1.1.4"
+OID_LOAD_BANK: Final = f"{_RPDU}.2.3.1.1.5"
 
-# Status mapping
-OUTLET_STATUS = {
-    1: "On",
-    2: "Off",
-    3: "Rebooting",
+# rPDUOutletDevice
+OID_MONITORED_OUTLETS: Final = f"{_RPDU}.3.1.5.0"
+
+# rPDUOutletControlTable / rPDUOutletStatusTable, indexed by outlet number
+OID_OUTLET_COMMAND: Final = f"{_RPDU}.3.3.1.1.4"
+OID_OUTLET_NAME: Final = f"{_RPDU}.3.5.1.1.2"
+OID_OUTLET_STATE: Final = f"{_RPDU}.3.5.1.1.4"
+OID_OUTLET_CURRENT: Final = f"{_RPDU}.3.5.1.1.7"  # tenths of amps, metered models
+
+OUTLET_STATE_ON: Final = 1
+OUTLET_STATE_OFF: Final = 2
+OUTLET_COMMAND_ON: Final = 1  # immediateOn
+OUTLET_COMMAND_OFF: Final = 2  # immediateOff
+
+# rPDULoadStatusLoadState
+LOAD_STATES: Final = {
+    1: "normal",
+    2: "low",
+    3: "near_overload",
+    4: "overload",
 }
-
-BANK_LOAD_STATE = {
-    1: "Low Load",
-    2: "Normal",
-    3: "Near Overload",
-    4: "Overload",
-}
-

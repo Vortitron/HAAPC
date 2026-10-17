@@ -1,291 +1,188 @@
-"""Sensor platform for APC PDU."""
-from __future__ import annotations
+"""Sensors for APC PDU."""
 
-import logging
-from typing import Any
+from __future__ import annotations
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent, UnitOfElectricPotential, UnitOfPower
+from homeassistant.const import (
+    EntityCategory,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import APCPDUDataUpdateCoordinator
+from .const import LOAD_STATES
+from .coordinator import APCPDUConfigEntry, APCPDUCoordinator
+from .entity import APCPDUEntity
+from .snmp import LoadEntry
 
-_LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: APCPDUConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up APC PDU sensors."""
-    coordinator: APCPDUDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    entities = []
-    
-    # Add device info sensors
-    entities.extend([
-        APCPDUInfoSensor(coordinator, entry, "outlet_count", "Outlet Count", "mdi:power-socket"),
-        APCPDUInfoSensor(coordinator, entry, "hardware", "Hardware Version", "mdi:chip", entity_category=EntityCategory.DIAGNOSTIC),
-        APCPDUInfoSensor(coordinator, entry, "firmware", "Firmware Version", "mdi:package", entity_category=EntityCategory.DIAGNOSTIC),
-    ])
-    
-    # Add PDU status sensors
-    entities.extend([
-        APCPDURatedVoltageSensor(coordinator, entry),
-        APCPDURatedCurrentSensor(coordinator, entry),
-        APCPDUBankLoadSensor(coordinator, entry),
-    ])
-    
-    # Add per-outlet power sensors
-    outlets = coordinator.data.get("outlets", {})
-    for outlet_num in outlets:
-        entities.append(APCPDUOutletPowerSensor(coordinator, entry, outlet_num))
-    
+    """Create sensors for the values this PDU actually reports."""
+    coordinator = entry.runtime_data
+    info = coordinator.info
+    entities: list[SensorEntity] = []
+
+    single = len(info.loads) == 1
+    for load in info.loads:
+        entities.append(APCPDULoadCurrentSensor(coordinator, load, single))
+        entities.append(APCPDULoadStateSensor(coordinator, load, single))
+    if info.has_power:
+        entities.append(APCPDUPowerSensor(coordinator))
+    if info.has_outlet_current:
+        entities.extend(
+            APCPDUOutletCurrentSensor(coordinator, outlet)
+            for outlet in range(1, info.outlet_count + 1)
+        )
+    if info.rated_current:
+        entities.append(
+            APCPDURatingSensor(
+                coordinator,
+                "rated_current",
+                info.rated_current,
+                SensorDeviceClass.CURRENT,
+                UnitOfElectricCurrent.AMPERE,
+            )
+        )
+    if info.nominal_voltage:
+        entities.append(
+            APCPDURatingSensor(
+                coordinator,
+                # unique ID kept from 1.0.x ("Rated voltage")
+                "rated_voltage",
+                info.nominal_voltage,
+                SensorDeviceClass.VOLTAGE,
+                UnitOfElectricPotential.VOLT,
+                translation_key="nominal_voltage",
+            )
+        )
     async_add_entities(entities)
 
 
-class APCPDUInfoSensor(CoordinatorEntity[APCPDUDataUpdateCoordinator], SensorEntity):
-    """Sensor for device information."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: APCPDUDataUpdateCoordinator,
-        entry: ConfigEntry,
-        info_key: str,
-        name: str,
-        icon: str,
-        entity_category: EntityCategory | None = None,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._info_key = info_key
-        
-        device_info = coordinator.data.get("device_info", {})
-        serial = device_info.get("serial_number", entry.entry_id)
-        
-        self._attr_unique_id = f"{serial}_{info_key}"
-        self._attr_name = name
-        self._attr_icon = icon
-        if entity_category:
-            self._attr_entity_category = entity_category
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        device_data = self.coordinator.data.get("device_info", {})
-        
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_data.get("serial_number", self._entry.entry_id))},
-            name=self._entry.data.get("name") or device_data.get("model", "APC PDU"),
-            manufacturer="APC",
-            model=device_data.get("model"),
-            sw_version=device_data.get("firmware"),
-            hw_version=device_data.get("hardware"),
-        )
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the state of the sensor."""
-        device_data = self.coordinator.data.get("device_info", {})
-        return device_data.get(self._info_key)
+def _load_translation(load: LoadEntry, single: bool, suffix: str) -> tuple[str, dict[str, str]]:
+    """Name a phase/bank row: no prefix when the PDU has only one."""
+    if single:
+        return suffix, {}
+    if load.bank:
+        return f"bank_{suffix}", {"number": str(load.bank)}
+    return f"phase_{suffix}", {"number": str(load.phase or load.index)}
 
 
-class APCPDURatedVoltageSensor(CoordinatorEntity[APCPDUDataUpdateCoordinator], SensorEntity):
-    """Sensor for rated voltage."""
+class APCPDULoadCurrentSensor(APCPDUEntity, SensorEntity):
+    """Measured current of a phase or bank."""
 
-    _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.VOLTAGE
-    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
-    _attr_icon = "mdi:lightning-bolt"
-
-    def __init__(
-        self,
-        coordinator: APCPDUDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        
-        device_info = coordinator.data.get("device_info", {})
-        serial = device_info.get("serial_number", entry.entry_id)
-        
-        self._attr_unique_id = f"{serial}_rated_voltage"
-        self._attr_name = "Rated Voltage"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        device_data = self.coordinator.data.get("device_info", {})
-        
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_data.get("serial_number", self._entry.entry_id))},
-            name=self._entry.data.get("name") or device_data.get("model", "APC PDU"),
-            manufacturer="APC",
-            model=device_data.get("model"),
-            sw_version=device_data.get("firmware"),
-            hw_version=device_data.get("hardware"),
-        )
-
-    @property
-    def native_value(self) -> int | None:
-        """Return the state of the sensor."""
-        pdu_status = self.coordinator.data.get("pdu_status", {})
-        return pdu_status.get("rated_voltage")
-
-
-class APCPDURatedCurrentSensor(CoordinatorEntity[APCPDUDataUpdateCoordinator], SensorEntity):
-    """Sensor for rated max current."""
-
-    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.CURRENT
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_icon = "mdi:current-ac"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
 
-    def __init__(
-        self,
-        coordinator: APCPDUDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        
-        device_info = coordinator.data.get("device_info", {})
-        serial = device_info.get("serial_number", entry.entry_id)
-        
-        self._attr_unique_id = f"{serial}_rated_max_current"
-        self._attr_name = "Rated Max Current"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        device_data = self.coordinator.data.get("device_info", {})
-        
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_data.get("serial_number", self._entry.entry_id))},
-            name=self._entry.data.get("name") or device_data.get("model", "APC PDU"),
-            manufacturer="APC",
-            model=device_data.get("model"),
-            sw_version=device_data.get("firmware"),
-            hw_version=device_data.get("hardware"),
+    def __init__(self, coordinator: APCPDUCoordinator, load: LoadEntry, single: bool) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, f"load_{load.index}_current")
+        self._index = load.index
+        self._attr_translation_key, self._attr_translation_placeholders = _load_translation(
+            load, single, "current"
         )
 
     @property
     def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        pdu_status = self.coordinator.data.get("pdu_status", {})
-        return pdu_status.get("rated_max_current")
+        """Return the current in amps."""
+        return self.coordinator.data.load_current.get(self._index)
 
 
-class APCPDUBankLoadSensor(CoordinatorEntity[APCPDUDataUpdateCoordinator], SensorEntity):
-    """Sensor for bank load state."""
+class APCPDULoadStateSensor(APCPDUEntity, SensorEntity):
+    """Load alarm state of a phase or bank."""
 
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:gauge"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(LOAD_STATES.values())
 
-    def __init__(
-        self,
-        coordinator: APCPDUDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        
-        device_info = coordinator.data.get("device_info", {})
-        serial = device_info.get("serial_number", entry.entry_id)
-        
-        self._attr_unique_id = f"{serial}_bank_load_state"
-        self._attr_name = "Bank Load State"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        device_data = self.coordinator.data.get("device_info", {})
-        
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_data.get("serial_number", self._entry.entry_id))},
-            name=self._entry.data.get("name") or device_data.get("model", "APC PDU"),
-            manufacturer="APC",
-            model=device_data.get("model"),
-            sw_version=device_data.get("firmware"),
-            hw_version=device_data.get("hardware"),
+    def __init__(self, coordinator: APCPDUCoordinator, load: LoadEntry, single: bool) -> None:
+        """Initialise the sensor (row 1 keeps the 1.0.x unique ID)."""
+        key = "bank_load_state" if load.index == 1 else f"load_{load.index}_state"
+        super().__init__(coordinator, key)
+        self._index = load.index
+        self._attr_translation_key, self._attr_translation_placeholders = _load_translation(
+            load, single, "load_state"
         )
 
     @property
     def native_value(self) -> str | None:
-        """Return the state of the sensor."""
-        pdu_status = self.coordinator.data.get("pdu_status", {})
-        return pdu_status.get("bank_load_state")
+        """Return normal, low, near_overload or overload."""
+        return self.coordinator.data.load_state.get(self._index)
 
 
-class APCPDUOutletPowerSensor(CoordinatorEntity[APCPDUDataUpdateCoordinator], SensorEntity):
-    """Sensor for outlet power consumption."""
+class APCPDUPowerSensor(APCPDUEntity, SensorEntity):
+    """Total power reported by the PDU."""
 
-    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(
-        self,
-        coordinator: APCPDUDataUpdateCoordinator,
-        entry: ConfigEntry,
-        outlet_num: int,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self.outlet_num = outlet_num
-        
-        device_info = coordinator.data.get("device_info", {})
-        serial = device_info.get("serial_number", entry.entry_id)
-        
-        self._attr_unique_id = f"{serial}_outlet_{outlet_num}_power"
-        self._attr_name = f"Outlet {outlet_num} Power"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        device_data = self.coordinator.data.get("device_info", {})
-        
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_data.get("serial_number", self._entry.entry_id))},
-            name=self._entry.data.get("name") or device_data.get("model", "APC PDU"),
-            manufacturer="APC",
-            model=device_data.get("model"),
-            sw_version=device_data.get("firmware"),
-            hw_version=device_data.get("hardware"),
-        )
+    def __init__(self, coordinator: APCPDUCoordinator) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, "power")
+        self._attr_translation_key = "power"
 
     @property
     def native_value(self) -> int | None:
-        """Return the state of the sensor."""
-        outlet_data = self.coordinator.data.get("outlets", {}).get(self.outlet_num, {})
-        return outlet_data.get("power")
+        """Return the power in watts."""
+        return self.coordinator.data.power
+
+
+class APCPDUOutletCurrentSensor(APCPDUEntity, SensorEntity):
+    """Current drawn by one outlet (outlet-metered PDUs only)."""
+
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: APCPDUCoordinator, outlet: int) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, f"outlet_{outlet}_current")
+        self.outlet = outlet
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        outlet_data = self.coordinator.data.get("outlets", {}).get(self.outlet_num, {})
-        
-        return {
-            "outlet_number": self.outlet_num,
-            "outlet_name": outlet_data.get("name"),
-            "outlet_status": outlet_data.get("status"),
-        }
+    def name(self) -> str:
+        """Name after the outlet as configured on the PDU."""
+        status = self.coordinator.data.outlets.get(self.outlet)
+        return f"{(status.name if status else None) or f'Outlet {self.outlet}'} current"
 
+    @property
+    def native_value(self) -> float | None:
+        """Return the current in amps."""
+        status = self.coordinator.data.outlets.get(self.outlet)
+        return status.current if status else None
+
+
+class APCPDURatingSensor(APCPDUEntity, SensorEntity):
+    """A fixed rating read from the PDU at setup."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: APCPDUCoordinator,
+        key: str,
+        value: int,
+        device_class: SensorDeviceClass,
+        unit: str,
+        translation_key: str | None = None,
+    ) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, key)
+        self._attr_translation_key = translation_key or key
+        self._attr_native_value = value
+        self._attr_device_class = device_class
+        self._attr_native_unit_of_measurement = unit

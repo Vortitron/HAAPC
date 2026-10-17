@@ -2,24 +2,160 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add APC PDU",
-        "description": "Enter the details of your APC PDU",
+        "description": "Connect to an APC Switched Rack PDU (AP79xx and similar) over SNMP. SNMP must be enabled on the PDU's network management card.",
         "data": {
-          "host": "IP Address",
-          "community": "SNMP Community String",
-          "name": "Device Name (optional)",
-          "snmp_version": "SNMP Version",
-          "demo_mode": "Demo Mode (for testing without hardware)"
+          "host": "Host",
+          "community": "Community",
+          "snmp_version": "SNMP version",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "IP address or host name of the PDU.",
+          "community": "A read-write community is needed to switch outlets. Not used with SNMPv3.",
+          "snmp_version": "SNMPv3 asks for a user name and keys in the next step.",
+          "port": "UDP port, normally 161."
+        }
+      },
+      "snmpv3": {
+        "title": "SNMPv3 credentials",
+        "description": "Enter the SNMPv3 user configured on {host}.",
+        "data": {
+          "username": "User name",
+          "auth_protocol": "Authentication protocol",
+          "auth_key": "Authentication passphrase",
+          "priv_protocol": "Privacy protocol",
+          "priv_key": "Privacy passphrase"
+        }
+      },
+      "reconfigure": {
+        "description": "Change how Home Assistant reaches this PDU.",
+        "data": {
+          "host": "Host",
+          "community": "Community",
+          "snmp_version": "SNMP version",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "IP address or host name of the PDU.",
+          "community": "A read-write community is needed to switch outlets. Not used with SNMPv3.",
+          "snmp_version": "SNMPv3 asks for a user name and keys in the next step.",
+          "port": "UDP port, normally 161."
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to PDU. Please check the IP address and SNMP community string.",
-      "unknown": "Unexpected error occurred"
+      "cannot_connect": "No answer from the PDU. Check the host, port, SNMP version and community: a PDU ignores requests with a wrong community, so this looks the same as an unreachable PDU.",
+      "invalid_auth": "The PDU rejected the SNMPv3 user name or passphrases.",
+      "not_supported": "The device answered but does not provide the APC rPDU MIB. Only APC Switched Rack PDUs are supported.",
+      "key_too_short": "Passphrases must be at least 8 characters.",
+      "priv_requires_auth": "Privacy (encryption) needs an authentication protocol.",
+      "unknown": "Unexpected error, see the Home Assistant log."
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "This PDU is already configured.",
+      "reconfigure_successful": "The PDU settings were updated.",
+      "wrong_device": "That address belongs to a different PDU (serial number does not match)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Polling interval"
+        },
+        "data_description": {
+          "scan_interval": "How often outlet states and load readings are read."
+        }
+      }
+    }
+  },
+  "selector": {
+    "snmp_version": {
+      "options": {
+        "1": "SNMPv1",
+        "2c": "SNMPv2c",
+        "3": "SNMPv3"
+      }
+    },
+    "auth_protocol": {
+      "options": {
+        "none": "None",
+        "md5": "MD5",
+        "sha": "SHA-1",
+        "sha224": "SHA-224",
+        "sha256": "SHA-256",
+        "sha384": "SHA-384",
+        "sha512": "SHA-512"
+      }
+    },
+    "priv_protocol": {
+      "options": {
+        "none": "None",
+        "des": "DES",
+        "3des": "3DES",
+        "aes": "AES-128",
+        "aes192": "AES-192",
+        "aes256": "AES-256"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "current": {
+        "name": "Current"
+      },
+      "phase_current": {
+        "name": "Phase {number} current"
+      },
+      "bank_current": {
+        "name": "Bank {number} current"
+      },
+      "load_state": {
+        "name": "Load state",
+        "state": {
+          "normal": "Normal",
+          "low": "Low",
+          "near_overload": "Near overload",
+          "overload": "Overload"
+        }
+      },
+      "phase_load_state": {
+        "name": "Phase {number} load state",
+        "state": {
+          "normal": "Normal",
+          "low": "Low",
+          "near_overload": "Near overload",
+          "overload": "Overload"
+        }
+      },
+      "bank_load_state": {
+        "name": "Bank {number} load state",
+        "state": {
+          "normal": "Normal",
+          "low": "Low",
+          "near_overload": "Near overload",
+          "overload": "Overload"
+        }
+      },
+      "power": {
+        "name": "Power"
+      },
+      "rated_current": {
+        "name": "Rated current"
+      },
+      "nominal_voltage": {
+        "name": "Nominal voltage"
+      }
+    },
+    "switch": {
+      "all_outlets": {
+        "name": "All outlets"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "The PDU did not switch {target}: {error}. Check that the community (or SNMPv3 user) has write access."
     }
   }
 }
-

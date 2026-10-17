@@ -1,166 +1,272 @@
-"""Config flow for APC PDU integration."""
+"""Config flow for APC PDU."""
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-
-from homeassistant import config_entries
-from homeassistant.const import CONF_HOST
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers import config_validation as cv
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+)
+from homeassistant.const import CONF_HOST, CONF_PORT, CONF_SCAN_INTERVAL, CONF_USERNAME
+from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .const import (
+    AUTH_NONE,
+    AUTH_PROTOCOLS,
+    CONF_AUTH_KEY,
+    CONF_AUTH_PROTOCOL,
     CONF_COMMUNITY,
-    CONF_DEMO_MODE,
-    CONF_NAME,
+    CONF_PRIV_KEY,
+    CONF_PRIV_PROTOCOL,
     CONF_SNMP_VERSION,
+    DEFAULT_COMMUNITY,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SNMP_VERSION,
     DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+    PRIV_NONE,
+    PRIV_PROTOCOLS,
+    SNMP_VERSION_3,
+    SNMP_VERSIONS,
 )
-from .demo_client import DemoSNMPClient
-from .snmp_cli_client import SNMPCLIClient
-from .snmp_client import SNMPClient
+from .coordinator import client_from_data
+from .snmp import APCPDUError, CannotConnect, InvalidAuth, NotSupported, PDUInfo
+
+try:  # Home Assistant 2025.8+ reloads the entry itself after the options flow
+    from homeassistant.config_entries import OptionsFlowWithReload as _OptionsFlow
+
+    OPTIONS_FLOW_RELOADS = True
+except ImportError:  # older releases: __init__ applies options via an update listener
+    from homeassistant.config_entries import OptionsFlow as _OptionsFlow
+
+    OPTIONS_FLOW_RELOADS = False
 
 _LOGGER = logging.getLogger(__name__)
 
+MIN_KEY_LENGTH = 8  # RFC 3414 minimum for SNMPv3 passphrases
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
-    _LOGGER.debug(
-        "=== APC PDU Connection Attempt === Host: %s, Community: %s, Version: %s, Demo: %s",
-        data[CONF_HOST],
-        data[CONF_COMMUNITY][:3] + "***",  # Partially hide community string
-        data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-        data.get(CONF_DEMO_MODE, False),
+_PASSWORD = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
+
+def _select(options: list[str], key: str) -> SelectSelector:
+    return SelectSelector(
+        SelectSelectorConfig(options=options, translation_key=key, mode=SelectSelectorMode.DROPDOWN)
     )
-    
-    # Use demo client if demo mode is enabled
-    if data.get(CONF_DEMO_MODE, False):
-        _LOGGER.info("Using Demo Mode (simulated PDU)")
-        client = DemoSNMPClient(
-            host=data[CONF_HOST],
-            community=data[CONF_COMMUNITY],
-            version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-        )
-    else:
-        # Try pysnmp first (if HA's SNMP works, this should too!)
-        # Then fall back to CLI if unavailable
-        try:
-            _LOGGER.debug("Attempting to use pysnmp library...")
-            client = SNMPClient(
-                host=data[CONF_HOST],
-                community=data[CONF_COMMUNITY],
-                version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-            )
-            _LOGGER.info("✅ Successfully initialized pysnmp client")
-        except ImportError as err:
-            # pysnmp not available - try CLI fallback
-            _LOGGER.info(
-                "⚠️ pysnmp not available (%s), trying command-line SNMP tools as fallback",
-                err
-            )
-            try:
-                client = SNMPCLIClient(
-                    host=data[CONF_HOST],
-                    community=data[CONF_COMMUNITY],
-                    version=data.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
-                )
-                _LOGGER.info("✅ Successfully initialized CLI SNMP client")
-            except ImportError as cli_err:
-                # CLI tools also not available
-                _LOGGER.error(
-                    "❌ Both pysnmp and CLI tools unavailable. "
-                    "Original pysnmp error: %s. CLI error: %s. "
-                    "Please enable Demo Mode for testing.",
-                    err, cli_err
-                )
-                raise CannotConnect(
-                    "SNMP not available. Both pysnmp and CLI tools failed. "
-                    "Please enable Demo Mode or wait for Home Assistant to fix pysnmp."
-                ) from cli_err
-    
-    # Test connection by getting device info
-    _LOGGER.debug("Testing connection by retrieving device info...")
+
+
+def _connection_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, vol.UNDEFINED)): str,
+            vol.Required(
+                CONF_COMMUNITY, default=defaults.get(CONF_COMMUNITY) or DEFAULT_COMMUNITY
+            ): _PASSWORD,
+            vol.Required(
+                CONF_SNMP_VERSION,
+                default=defaults.get(CONF_SNMP_VERSION, DEFAULT_SNMP_VERSION),
+            ): _select(SNMP_VERSIONS, CONF_SNMP_VERSION),
+            vol.Required(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=65535)
+            ),
+        }
+    )
+
+
+def _snmpv3_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, vol.UNDEFINED)): str,
+            vol.Required(
+                CONF_AUTH_PROTOCOL, default=defaults.get(CONF_AUTH_PROTOCOL, "sha")
+            ): _select(AUTH_PROTOCOLS, CONF_AUTH_PROTOCOL),
+            vol.Optional(CONF_AUTH_KEY, default=defaults.get(CONF_AUTH_KEY, "")): _PASSWORD,
+            vol.Required(
+                CONF_PRIV_PROTOCOL, default=defaults.get(CONF_PRIV_PROTOCOL, "aes")
+            ): _select(PRIV_PROTOCOLS, CONF_PRIV_PROTOCOL),
+            vol.Optional(CONF_PRIV_KEY, default=defaults.get(CONF_PRIV_KEY, "")): _PASSWORD,
+        }
+    )
+
+
+def _snmpv3_errors(data: Mapping[str, Any]) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    auth = data.get(CONF_AUTH_PROTOCOL, AUTH_NONE)
+    priv = data.get(CONF_PRIV_PROTOCOL, PRIV_NONE)
+    if auth != AUTH_NONE and len(data.get(CONF_AUTH_KEY) or "") < MIN_KEY_LENGTH:
+        errors[CONF_AUTH_KEY] = "key_too_short"
+    if priv != PRIV_NONE:
+        if auth == AUTH_NONE:
+            errors["base"] = "priv_requires_auth"
+        elif len(data.get(CONF_PRIV_KEY) or "") < MIN_KEY_LENGTH:
+            errors[CONF_PRIV_KEY] = "key_too_short"
+    return errors
+
+
+async def _async_probe(data: dict[str, Any]) -> tuple[PDUInfo | None, str | None]:
+    """Read the PDU's identity; return (info, error key)."""
+    client = client_from_data(data)
     try:
-        device_info = await hass.async_add_executor_job(client.get_device_info)
-        _LOGGER.debug("Device info retrieved: %s", device_info)
-    except Exception as ex:
-        _LOGGER.error("❌ Failed to get device info: %s (type: %s)", ex, type(ex).__name__, exc_info=True)
-        raise CannotConnect(f"Unable to connect to PDU: {ex}") from ex
-    
-    if not device_info:
-        _LOGGER.error("❌ Device info is None or empty")
-        raise CannotConnect("Unable to get device information from PDU (no data returned)")
-    
-    if not device_info.get("model"):
-        _LOGGER.error("❌ Device info missing 'model' field. Got: %s", device_info)
-        raise CannotConnect("Unable to get device model from PDU")
-    
-    # Determine title
-    title = data.get(CONF_NAME) or device_info.get("model") or "APC PDU"
-    _LOGGER.info("✅ Connection successful! Title: %s", title)
-    
-    return {
-        "title": title,
-        "device_info": device_info,
-    }
+        return await client.async_get_info(), None
+    except InvalidAuth:
+        return None, "invalid_auth"
+    except NotSupported as err:
+        _LOGGER.debug("Not an APC rPDU: %s", err)
+        return None, "not_supported"
+    except (CannotConnect, APCPDUError) as err:
+        _LOGGER.debug("Cannot read %s: %s", data.get(CONF_HOST), err)
+        return None, "cannot_connect"
+    except Exception:
+        _LOGGER.exception("Unexpected error talking to %s", data.get(CONF_HOST))
+        return None, "unknown"
+    finally:
+        await client.async_close()
 
 
-class APCPDUConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for APC PDU."""
+class APCPDUConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Set up an APC PDU."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
-    async def async_step_user(
+    def __init__(self) -> None:
+        """Initialise the flow."""
+        self._data: dict[str, Any] = {}
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> APCPDUOptionsFlow:
+        """Return the options flow."""
+        return APCPDUOptionsFlow()
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask where the PDU is and how to reach it."""
+        return await self._async_step_connection("user", user_input, {})
+
+    async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the initial step."""
+    ) -> ConfigFlowResult:
+        """Change the address or credentials of an existing PDU."""
+        return await self._async_step_connection(
+            "reconfigure", user_input, self._get_reconfigure_entry().data
+        )
+
+    async def _async_step_connection(
+        self,
+        step_id: str,
+        user_input: dict[str, Any] | None,
+        defaults: Mapping[str, Any],
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
-
         if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                # Create unique ID from serial number if available
-                device_info = info.get("device_info", {})
-                unique_id = device_info.get("serial_number")
-                
-                if unique_id:
-                    await self.async_set_unique_id(unique_id)
-                    self._abort_if_unique_id_configured()
-
-                return self.async_create_entry(
-                    title=info["title"],
-                    data=user_input,
-                )
-
-        data_schema = vol.Schema(
-            {
-                vol.Required(CONF_HOST): str,
-                vol.Required(CONF_COMMUNITY, default="private"): str,
-                vol.Optional(CONF_NAME): str,
-                vol.Optional(CONF_SNMP_VERSION, default=DEFAULT_SNMP_VERSION): vol.In(
-                    ["1", "2c"]
-                ),
-                vol.Optional(CONF_DEMO_MODE, default=False): bool,
-            }
-        )
-
+            user_input[CONF_HOST] = user_input[CONF_HOST].strip()
+            if user_input[CONF_SNMP_VERSION] == SNMP_VERSION_3:
+                user_input.pop(CONF_COMMUNITY, None)
+                self._data = user_input
+                return await self.async_step_snmpv3()
+            result = await self._async_validate_and_finish(user_input, errors)
+            if result is not None:
+                return result
+            defaults = user_input
         return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
-            errors=errors,
+            step_id=step_id, data_schema=_connection_schema(defaults), errors=errors
         )
 
+    async def async_step_snmpv3(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask for SNMPv3 credentials."""
+        errors: dict[str, str] = {}
+        defaults: Mapping[str, Any] = {}
+        if self.source == SOURCE_RECONFIGURE:
+            defaults = self._get_reconfigure_entry().data
+        if user_input is not None:
+            errors = _snmpv3_errors(user_input)
+            if not errors:
+                data = {**self._data, **user_input}
+                if data[CONF_AUTH_PROTOCOL] == AUTH_NONE:
+                    data.pop(CONF_AUTH_KEY, None)
+                if data[CONF_PRIV_PROTOCOL] == PRIV_NONE:
+                    data.pop(CONF_PRIV_KEY, None)
+                result = await self._async_validate_and_finish(data, errors)
+                if result is not None:
+                    return result
+            defaults = user_input
+        return self.async_show_form(
+            step_id="snmpv3",
+            data_schema=_snmpv3_schema(defaults),
+            errors=errors,
+            description_placeholders={"host": self._data.get(CONF_HOST, "")},
+        )
 
-class CannotConnect(Exception):
-    """Error to indicate we cannot connect."""
+    async def _async_validate_and_finish(
+        self, data: dict[str, Any], errors: dict[str, str]
+    ) -> ConfigFlowResult | None:
+        """Probe the PDU, then create or update the entry; None on error."""
+        info, error = await _async_probe(data)
+        if info is None:
+            errors["base"] = error or "unknown"
+            return None
 
+        if self.source == SOURCE_RECONFIGURE:
+            entry = self._get_reconfigure_entry()
+            if entry.unique_id and info.serial:
+                await self.async_set_unique_id(info.serial)
+                self._abort_if_unique_id_mismatch(reason="wrong_device")
+            return self.async_update_reload_and_abort(entry, data=data)
+
+        if info.serial:
+            await self.async_set_unique_id(info.serial)
+            # The same PDU at a new address updates the existing entry
+            self._abort_if_unique_id_configured(updates=data)
+        else:
+            self._async_abort_entries_match({CONF_HOST: data[CONF_HOST]})
+        return self.async_create_entry(title=info.name or info.model or "APC PDU", data=data)
+
+
+class APCPDUOptionsFlow(_OptionsFlow):
+    """Polling options."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose how often the PDU is polled."""
+        if user_input is not None:
+            return self.async_create_entry(
+                data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])}
+            )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SCAN_INTERVAL,
+                        default=self.config_entry.options.get(
+                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=MIN_SCAN_INTERVAL,
+                            max=MAX_SCAN_INTERVAL,
+                            step=1,
+                            unit_of_measurement="s",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                }
+            ),
+        )
