@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from custom_components.apc_pdu.snmp import (  # noqa: E402
+from custom_components.apc_pdu_manager.snmp import (  # noqa: E402
     APCPDUError,
     LoadEntry,
     OutletStatus,
@@ -115,7 +115,7 @@ def pdu() -> Generator[FakePDU]:
     def factory(host: str, auth: SNMPAuth, port: int = 161, **_: Any) -> FakeClient:
         return FakeClient(fake, host, auth, port)
 
-    with patch("custom_components.apc_pdu.coordinator.APCPDUClient", side_effect=factory):
+    with patch("custom_components.apc_pdu_manager.coordinator.APCPDUClient", side_effect=factory):
         yield fake
 
 

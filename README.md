@@ -1,4 +1,4 @@
-# APC PDU for Home Assistant
+# APC PDU Manager for Home Assistant
 
 [![HACS](https://img.shields.io/badge/HACS-Integration-41BDF5.svg)](https://hacs.xyz)
 [![Validate](https://github.com/Vortitron/HAAPC/actions/workflows/validate.yml/badge.svg)](https://github.com/Vortitron/HAAPC/actions/workflows/validate.yml)
@@ -22,14 +22,14 @@ SNMPv1, SNMPv2c and SNMPv3 are supported.
 
 ### HACS
 
-Search for **APC PDU** in HACS, download it and restart Home Assistant.
+Search for **APC PDU Manager** in HACS, download it and restart Home Assistant.
 
 If it is not listed yet, add `https://github.com/Vortitron/HAAPC` as a custom
 repository of type *Integration* first.
 
 ### Manual
 
-Copy `custom_components/apc_pdu` into the `custom_components` folder of your
+Copy `custom_components/apc_pdu_manager` into the `custom_components` folder of your
 Home Assistant configuration and restart Home Assistant.
 
 ## Preparing the PDU
@@ -45,7 +45,7 @@ In the PDU's web interface (or over telnet/SSH):
 
 ## Configuration
 
-*Settings > Devices & services > Add integration > APC PDU*
+*Settings > Devices & services > Add integration > APC PDU Manager*
 
 | Field | Description |
 | --- | --- |
@@ -158,7 +158,7 @@ write access. Home Assistant reports "The PDU did not switch ...".
 ```yaml
 logger:
   logs:
-    custom_components.apc_pdu: debug
+    custom_components.apc_pdu_manager: debug
 ```
 
 ### OIDs used
@@ -177,6 +177,29 @@ All under `.1.3.6.1.4.1.318.1.1.12` (PowerNet-MIB `rPDU`):
 | `.3.1.5.0` | number of monitored outlets |
 | `.3.3.1.1.4.N` | outlet command (1 = on, 2 = off) |
 | `.3.5.1.1.2.N` / `.3.5.1.1.4.N` / `.3.5.1.1.7.N` | outlet name / state / load (0.1 A) |
+
+## Upgrading from 1.1.x
+
+1.2.0 renames the integration from `apc_pdu` to `apc_pdu_manager` (shown as
+*APC PDU Manager*). Another integration in the HACS store already uses
+`apc_pdu`, and two integrations sharing a domain install into the same folder
+and overwrite each other.
+
+Home Assistant cannot carry a config entry from one domain to another, so the
+PDU is added again once:
+
+1. *Settings > Devices & services > APC PDU*: delete the PDU. This also deletes
+   its entities, which frees their entity IDs.
+2. Update the integration in HACS (or replace `custom_components/apc_pdu` with
+   `custom_components/apc_pdu_manager`), delete the old
+   `custom_components/apc_pdu` folder and restart Home Assistant.
+3. Add *APC PDU Manager* with the same host and community.
+
+The entities come back with their default entity IDs, the same ones 1.1 gave
+them, so history, dashboards and automations carry on. Anything you changed in
+Home Assistant itself (a renamed entity ID, a name, area or icon) needs setting
+again. If you enabled debug logging, change the
+logger to `custom_components.apc_pdu_manager`.
 
 ## Upgrading from 1.0.x
 

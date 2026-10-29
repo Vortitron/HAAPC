@@ -7,12 +7,12 @@ from collections.abc import AsyncIterator
 import pytest
 from homeassistant import block_async_io
 
-from custom_components.apc_pdu.const import (
+from custom_components.apc_pdu_manager.const import (
     SNMP_VERSION_1,
     SNMP_VERSION_2C,
     SNMP_VERSION_3,
 )
-from custom_components.apc_pdu.snmp import (
+from custom_components.apc_pdu_manager.snmp import (
     APCPDUClient,
     CannotConnect,
     CommandFailed,

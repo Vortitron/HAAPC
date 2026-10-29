@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.apc_pdu.const import (
+from custom_components.apc_pdu_manager.const import (
     CONF_AUTH_KEY,
     CONF_AUTH_PROTOCOL,
     CONF_COMMUNITY,
@@ -18,7 +18,7 @@ from custom_components.apc_pdu.const import (
     CONF_SNMP_VERSION,
     DOMAIN,
 )
-from custom_components.apc_pdu.snmp import CannotConnect, InvalidAuth, NotSupported
+from custom_components.apc_pdu_manager.snmp import CannotConnect, InvalidAuth, NotSupported
 
 from .conftest import HOST, SERIAL, FakePDU
 

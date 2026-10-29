@@ -27,8 +27,8 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
-from custom_components.apc_pdu.const import CONF_COMMUNITY, CONF_SNMP_VERSION, DOMAIN
-from custom_components.apc_pdu.snmp import (
+from custom_components.apc_pdu_manager.const import CONF_COMMUNITY, CONF_SNMP_VERSION, DOMAIN
+from custom_components.apc_pdu_manager.snmp import (
     CannotConnect,
     CommandFailed,
     InvalidAuth,
