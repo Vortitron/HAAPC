@@ -24,8 +24,12 @@ from custom_components.apc_pdu_manager.snmp import (
 
 from .fake_agent import (
     RPDU,
+    RPDU2,
+    SPDU,
     FakeAPCAgent,
     ap7920_values,
+    ap8941_values,
+    ap9211_values,
     close_v3_agent,
     start_v3_agent,
 )
@@ -151,13 +155,126 @@ async def test_wrong_community_times_out(agent: FakeAPCAgent) -> None:
 
 
 async def test_not_an_apc_pdu(agent: FakeAPCAgent) -> None:
-    """A device without the rPDU MIB is rejected."""
+    """A device without any APC PDU MIB is rejected."""
     agent.values.clear()
     agent.values["1.3.6.1.2.1.1.1.0"] = "Some switch"
     client = await _client(agent, SNMPAuth(version=SNMP_VERSION_1, community="public"))
     try:
         with pytest.raises(NotSupported):
             await client.async_get_info()
+    finally:
+        await client.async_close()
+
+
+@pytest.mark.parametrize("version", [SNMP_VERSION_1, SNMP_VERSION_2C])
+async def test_read_rpdu2(agent: FakeAPCAgent, version: str) -> None:
+    """An AP89xx-style PDU is read through rPDU2, its chained neighbour left out."""
+    agent.values = ap8941_values()
+    client = await _client(agent, SNMPAuth(version=version, community="public"))
+    try:
+        info = await client.async_get_info()
+        assert info.mib == "rpdu2"
+        assert (info.model, info.serial, info.name) == ("AP8941", "5A1234E56789", "Rack B")
+        assert info.firmware == "v6.8.2"
+        assert info.outlet_count == 8
+        assert info.outlet_numbers == list(range(1, 9))
+        assert info.metered_outlets == list(range(1, 9))
+        assert info.rated_current == 16
+        assert info.nominal_voltage is None
+        assert info.has_power and info.has_energy and info.has_voltage
+        assert info.loads == [
+            LoadEntry(index=1, phase=1, row=1),
+            LoadEntry(index=2, bank=1, row=1),
+            LoadEntry(index=3, bank=2, row=2),
+        ]
+
+        status = await client.async_get_status(info)
+        assert set(status.outlets) == set(range(1, 9))
+        assert status.outlets[1].is_on is True  # rPDU2 reports on as 2
+        assert status.outlets[2].is_on is False
+        assert status.outlets[3].name == "PDU1 outlet 3"
+        assert status.outlets[5].current == 0.5
+        assert status.load_current == {1: 1.7, 2: 0.9, 3: 0.8}
+        # rPDU2 numbers low (1) and normal (2) the other way round from rPDU
+        assert status.load_state == {1: "normal", 2: "normal", 3: "near_overload"}
+        assert status.voltage == {1: 231}
+        assert status.power == 380
+        assert status.energy == 1234.5
+    finally:
+        await client.async_close()
+
+
+async def test_rpdu2_unsupported_values(agent: FakeAPCAgent) -> None:
+    """-1 means the model does not measure it: no power, energy or voltage."""
+    agent.values = ap8941_values()
+    agent.values[f"{RPDU2}.4.3.1.5.1"] = -1
+    agent.values[f"{RPDU2}.4.3.1.9.1"] = -1
+    agent.values[f"{RPDU2}.6.3.1.6.1"] = -1
+    agent.values[f"{RPDU2}.4.2.1.6.1"] = 0
+    client = await _client(agent, SNMPAuth(version=SNMP_VERSION_2C, community="public"))
+    try:
+        info = await client.async_get_info()
+        assert not (info.has_power or info.has_energy or info.has_voltage)
+        assert info.metered_outlets == []
+        status = await client.async_get_status(info)
+        assert status.power is None and status.energy is None and status.voltage == {}
+        assert status.outlets[4].current is None
+    finally:
+        await client.async_close()
+
+
+async def test_switch_rpdu2_outlet(agent: FakeAPCAgent) -> None:
+    """rPDU2 outlets are switched through the control table, by row."""
+    agent.values = ap8941_values()
+    client = await _client(agent, SNMPAuth(version=SNMP_VERSION_2C, community="private"))
+    try:
+        info = await client.async_get_info()
+        await client.async_set_outlet(2, True)
+        assert agent.values[f"{RPDU2}.9.2.4.1.5.2"] == 1
+        await client.async_set_outlet(1, False)
+        assert agent.values[f"{RPDU2}.9.2.4.1.5.1"] == 2
+        status = await client.async_get_status(info)
+        assert status.outlets[1].is_on is False
+        assert status.outlets[2].is_on is True
+        # The chained PDU's outlet 1 (row 9) was not touched
+        assert agent.values[f"{RPDU2}.9.2.3.1.5.9"] == 2
+    finally:
+        await client.async_close()
+
+
+@pytest.mark.parametrize("version", [SNMP_VERSION_1, SNMP_VERSION_2C])
+async def test_read_and_switch_spdu(agent: FakeAPCAgent, version: str) -> None:
+    """A MasterSwitch is driven through sPDU: outlets, no load readings."""
+    agent.values = ap9211_values()
+    client = await _client(agent, SNMPAuth(version=version, community="private"))
+    try:
+        info = await client.async_get_info()
+        assert info.mib == "spdu"
+        assert (info.model, info.serial, info.firmware) == ("AP9211", "WA9912345678", "v2.2.0")
+        assert info.outlet_count == 8
+        assert info.loads == []
+        assert not (info.has_power or info.has_outlet_current or info.rated_current)
+        status = await client.async_get_status(info)
+        assert status.outlets[1].is_on is True
+        assert status.outlets[2].is_on is False
+        assert status.outlets[2].name == "Socket 2"
+        await client.async_set_outlet(2, True)
+        assert agent.values[f"{SPDU}.4.2.1.3.2"] == 1
+        status = await client.async_get_status(info)
+        assert status.outlets[2].is_on is True
+    finally:
+        await client.async_close()
+
+
+async def test_rpdu_wins_over_spdu(agent: FakeAPCAgent) -> None:
+    """An AP79xx answering both branches keeps the rPDU readings."""
+    agent.values.update(ap9211_values())
+    client = await _client(agent, SNMPAuth(version=SNMP_VERSION_1, community="public"))
+    try:
+        info = await client.async_get_info()
+        assert info.mib == "rpdu"
+        assert info.model == "AP7920"
+        assert info.loads
     finally:
         await client.async_close()
 

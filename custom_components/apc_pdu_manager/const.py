@@ -32,6 +32,11 @@ DEFAULT_SCAN_INTERVAL: Final = 30
 MIN_SCAN_INTERVAL: Final = 10
 MAX_SCAN_INTERVAL: Final = 3600
 
+# Which PowerNet-MIB branch a PDU is driven through
+MIB_RPDU: Final = "rpdu"
+MIB_RPDU2: Final = "rpdu2"
+MIB_SPDU: Final = "spdu"
+
 # --- APC PowerNet-MIB, rPDU branch (.1.3.6.1.4.1.318.1.1.12) ---
 # Used by Switched Rack PDUs such as the AP79xx series.
 _RPDU: Final = "1.3.6.1.4.1.318.1.1.12"
@@ -78,3 +83,81 @@ LOAD_STATES: Final = {
     3: "near_overload",
     4: "overload",
 }
+
+# --- rPDU2 branch (.1.3.6.1.4.1.318.1.1.26) ---
+# Switched Rack PDUs from the AP84xx, AP86xx, AP88xx and AP89xx ranges. Every
+# table is indexed by row; daisy-chained PDUs share the tables, and the module
+# column says which PDU a row belongs to.
+_RPDU2: Final = "1.3.6.1.4.1.318.1.1.26"
+
+# rPDU2IdentTable
+OID2_IDENT_MODULE: Final = f"{_RPDU2}.2.1.2"
+OID2_IDENT_NAME: Final = f"{_RPDU2}.2.1.3"
+OID2_IDENT_HARDWARE_REV: Final = f"{_RPDU2}.2.1.5"
+OID2_IDENT_FIRMWARE_REV: Final = f"{_RPDU2}.2.1.6"
+OID2_IDENT_MODEL: Final = f"{_RPDU2}.2.1.8"
+OID2_IDENT_SERIAL: Final = f"{_RPDU2}.2.1.9"
+
+# rPDU2DevicePropertiesTable / rPDU2DeviceStatusTable
+OID2_DEVICE_SWITCHED_OUTLETS: Final = f"{_RPDU2}.4.2.1.5"
+OID2_DEVICE_METERED_OUTLETS: Final = f"{_RPDU2}.4.2.1.6"
+OID2_DEVICE_MAX_CURRENT: Final = f"{_RPDU2}.4.2.1.9"  # amps
+OID2_DEVICE_POWER: Final = f"{_RPDU2}.4.3.1.5"  # hundredths of kW, -1 unsupported
+OID2_DEVICE_ENERGY: Final = f"{_RPDU2}.4.3.1.9"  # tenths of kWh, -1 unsupported
+
+# Table sizes, across every PDU in a chain
+OID2_PHASE_TABLE_SIZE: Final = f"{_RPDU2}.5.0"
+OID2_BANK_TABLE_SIZE: Final = f"{_RPDU2}.7.0"
+OID2_SWITCHED_TABLE_SIZE: Final = f"{_RPDU2}.9.1.0"
+OID2_METERED_TABLE_SIZE: Final = f"{_RPDU2}.9.3.0"
+
+# rPDU2PhaseStatusTable
+OID2_PHASE_MODULE: Final = f"{_RPDU2}.6.3.1.2"
+OID2_PHASE_NUMBER: Final = f"{_RPDU2}.6.3.1.3"
+OID2_PHASE_LOAD_STATE: Final = f"{_RPDU2}.6.3.1.4"
+OID2_PHASE_CURRENT: Final = f"{_RPDU2}.6.3.1.5"  # tenths of amps
+OID2_PHASE_VOLTAGE: Final = f"{_RPDU2}.6.3.1.6"  # volts, -1 unsupported
+
+# rPDU2BankStatusTable
+OID2_BANK_MODULE: Final = f"{_RPDU2}.8.3.1.2"
+OID2_BANK_NUMBER: Final = f"{_RPDU2}.8.3.1.3"
+OID2_BANK_LOAD_STATE: Final = f"{_RPDU2}.8.3.1.4"
+OID2_BANK_CURRENT: Final = f"{_RPDU2}.8.3.1.5"  # tenths of amps
+
+# rPDU2OutletSwitchedStatusTable / rPDU2OutletSwitchedControlTable
+OID2_OUTLET_MODULE: Final = f"{_RPDU2}.9.2.3.1.2"
+OID2_OUTLET_NAME: Final = f"{_RPDU2}.9.2.3.1.3"
+OID2_OUTLET_NUMBER: Final = f"{_RPDU2}.9.2.3.1.4"
+OID2_OUTLET_STATE: Final = f"{_RPDU2}.9.2.3.1.5"
+OID2_OUTLET_COMMAND: Final = f"{_RPDU2}.9.2.4.1.5"
+
+# rPDU2OutletMeteredStatusTable
+OID2_METERED_MODULE: Final = f"{_RPDU2}.9.4.3.1.2"
+OID2_METERED_NUMBER: Final = f"{_RPDU2}.9.4.3.1.4"
+OID2_METERED_CURRENT: Final = f"{_RPDU2}.9.4.3.1.6"  # tenths of amps
+
+# rPDU2OutletSwitchedStatusState is off (1) / on (2), the reverse of rPDU
+OUTLET2_STATE_OFF: Final = 1
+OUTLET2_STATE_ON: Final = 2
+
+# rPDU2PhaseStatusLoadState / rPDU2BankStatusLoadState: low and normal are
+# numbered the other way round from rPDU
+LOAD_STATES2: Final = {
+    1: "low",
+    2: "normal",
+    3: "near_overload",
+    4: "overload",
+}
+
+# --- sPDU branch (.1.3.6.1.4.1.318.1.1.4) ---
+# MasterSwitch units that predate rPDU. They switch outlets but report no load.
+_SPDU: Final = "1.3.6.1.4.1.318.1.1.4"
+
+OIDS_HARDWARE_REV: Final = f"{_SPDU}.1.1.0"
+OIDS_FIRMWARE_REV: Final = f"{_SPDU}.1.2.0"
+OIDS_MODEL: Final = f"{_SPDU}.1.4.0"
+OIDS_SERIAL: Final = f"{_SPDU}.1.5.0"
+OIDS_OUTLET_COUNT: Final = f"{_SPDU}.4.1.0"
+# sPDUOutletCtl: reads the state (1 on, 2 off), writes the command (1 on, 2 off)
+OIDS_OUTLET_CTL: Final = f"{_SPDU}.4.2.1.3"
+OIDS_OUTLET_NAME: Final = f"{_SPDU}.4.2.1.4"

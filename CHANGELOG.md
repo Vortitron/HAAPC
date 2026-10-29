@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [1.2.0] - 2026-10-29
 
+### Added
+- rPDU2 PDUs (AP84xx, AP86xx, AP88xx, AP89xx): outlet switches, current and
+  load state per phase and bank, power, outlet current on metered models,
+  rated current, plus measured phase voltage and the PDU's energy meter. Only
+  the PDU at the configured address is included when PDUs are daisy-chained.
+- sPDU MasterSwitch units (AP92xx, AP96xx): outlet switches.
+- Setup detects the branch by itself, trying rPDU first, so AP79xx PDUs read
+  exactly as before.
+
 ### Changed
 - The integration is now `apc_pdu_manager`, shown as *APC PDU Manager*.
   Tycho-MEC/apc-pdu, already in the HACS store, also uses the `apc_pdu` domain,

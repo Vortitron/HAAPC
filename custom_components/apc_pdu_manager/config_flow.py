@@ -129,7 +129,7 @@ async def _async_probe(data: dict[str, Any]) -> tuple[PDUInfo | None, str | None
     except InvalidAuth:
         return None, "invalid_auth"
     except NotSupported as err:
-        _LOGGER.debug("Not an APC rPDU: %s", err)
+        _LOGGER.debug("Not a supported APC PDU: %s", err)
         return None, "not_supported"
     except (CannotConnect, APCPDUError) as err:
         _LOGGER.debug("Cannot read %s: %s", data.get(CONF_HOST), err)

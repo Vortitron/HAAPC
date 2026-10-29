@@ -11,6 +11,7 @@ from homeassistant.const import (
     EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
+    UnitOfEnergy,
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
@@ -38,13 +39,15 @@ async def async_setup_entry(
     for load in info.loads:
         entities.append(APCPDULoadCurrentSensor(coordinator, load, single))
         entities.append(APCPDULoadStateSensor(coordinator, load, single))
+        if info.has_voltage and not load.bank:
+            entities.append(APCPDULoadVoltageSensor(coordinator, load, single))
     if info.has_power:
         entities.append(APCPDUPowerSensor(coordinator))
-    if info.has_outlet_current:
-        entities.extend(
-            APCPDUOutletCurrentSensor(coordinator, outlet)
-            for outlet in range(1, info.outlet_count + 1)
-        )
+    if info.has_energy:
+        entities.append(APCPDUEnergySensor(coordinator))
+    entities.extend(
+        APCPDUOutletCurrentSensor(coordinator, outlet) for outlet in info.metered_outlets
+    )
     if info.rated_current:
         entities.append(
             APCPDURatingSensor(
@@ -122,6 +125,27 @@ class APCPDULoadStateSensor(APCPDUEntity, SensorEntity):
         return self.coordinator.data.load_state.get(self._index)
 
 
+class APCPDULoadVoltageSensor(APCPDUEntity, SensorEntity):
+    """Measured voltage of a phase (rPDU2 only)."""
+
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: APCPDUCoordinator, load: LoadEntry, single: bool) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, f"load_{load.index}_voltage")
+        self._index = load.index
+        self._attr_translation_key, self._attr_translation_placeholders = _load_translation(
+            load, single, "voltage"
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the voltage in volts."""
+        return self.coordinator.data.voltage.get(self._index)
+
+
 class APCPDUPowerSensor(APCPDUEntity, SensorEntity):
     """Total power reported by the PDU."""
 
@@ -138,6 +162,28 @@ class APCPDUPowerSensor(APCPDUEntity, SensorEntity):
     def native_value(self) -> int | None:
         """Return the power in watts."""
         return self.coordinator.data.power
+
+
+class APCPDUEnergySensor(APCPDUEntity, SensorEntity):
+    """The PDU's own energy meter (rPDU2 only).
+
+    It can be reset from the PDU, which total_increasing treats as a new cycle.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: APCPDUCoordinator) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, "energy")
+        self._attr_translation_key = "energy"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the energy in kWh."""
+        return self.coordinator.data.energy
 
 
 class APCPDUOutletCurrentSensor(APCPDUEntity, SensorEntity):

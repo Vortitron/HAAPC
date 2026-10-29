@@ -151,6 +151,67 @@ async def test_banked_and_outlet_metered_pdu(hass: HomeAssistant, pdu: FakePDU) 
     assert (outlet.state, outlet.attributes["friendly_name"]) == ("0.1", "Rack A Router current")
 
 
+async def test_rpdu2_pdu(hass: HomeAssistant, pdu: FakePDU) -> None:
+    """An rPDU2 PDU adds phase voltage and energy; only metered outlets get a current."""
+    pdu.info.mib = "rpdu2"
+    pdu.info.nominal_voltage = None
+    pdu.info.outlet_rows = {n: n for n in range(1, 9)}
+    pdu.info.metered_rows = {n: n for n in range(1, 5)}
+    pdu.info.has_outlet_current = True
+    pdu.info.has_voltage = True
+    pdu.info.has_energy = True
+    pdu.info.loads = [
+        LoadEntry(index=1, phase=1, row=1),
+        LoadEntry(index=2, bank=1, row=1),
+        LoadEntry(index=3, bank=2, row=2),
+    ]
+    pdu.load_current = {1: 3.1, 2: 1.9, 3: 1.2}
+    pdu.load_state = {1: "normal", 2: "normal", 3: "near_overload"}
+    pdu.voltage = {1: 231}
+    pdu.energy = 1234.5
+    entry = await _setup(hass)
+
+    voltage = hass.states.get(_entity_id(hass, "sensor", "load_1_voltage"))
+    assert (voltage.state, voltage.attributes["friendly_name"]) == ("231", "Rack A Phase 1 voltage")
+    assert voltage.attributes["unit_of_measurement"] == "V"
+    energy = hass.states.get(_entity_id(hass, "sensor", "energy"))
+    assert (energy.state, energy.attributes["friendly_name"]) == ("1234.5", "Rack A Energy")
+    assert energy.attributes["unit_of_measurement"] == "kWh"
+    assert energy.attributes["state_class"] == "total_increasing"
+    assert energy.attributes["device_class"] == "energy"
+
+    uids = {
+        e.unique_id for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    }
+    # Banks have no voltage, and outlets 5-8 are not metered
+    assert f"{SERIAL}_load_2_voltage" not in uids
+    assert {f"{SERIAL}_outlet_{n}_current" for n in range(1, 5)} <= uids
+    assert not {f"{SERIAL}_outlet_{n}_current" for n in range(5, 9)} & uids
+    assert f"{SERIAL}_rated_voltage" not in uids
+
+
+async def test_spdu_pdu_is_outlets_only(hass: HomeAssistant, pdu: FakePDU) -> None:
+    """A MasterSwitch reports no load, so only the switches are created."""
+    pdu.info.mib = "spdu"
+    pdu.info.loads = []
+    pdu.info.has_power = False
+    pdu.info.rated_current = None
+    pdu.info.nominal_voltage = None
+    pdu.load_current = {}
+    pdu.load_state = {}
+    entry = await _setup(hass)
+    entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert {e.domain for e in entities} == {"switch"}
+    assert len(entities) == 9
+    await hass.services.async_call(
+        SWITCH_DOMAIN,
+        SERVICE_TURN_ON,
+        {ATTR_ENTITY_ID: _entity_id(hass, "switch", "outlet_2")},
+        blocking=True,
+    )
+    assert pdu.set_calls == [(2, True)]
+
+
 async def test_switch_outlet(hass: HomeAssistant, pdu: FakePDU) -> None:
     """Turning an outlet on and off sends the SNMP command."""
     await _setup(hass)

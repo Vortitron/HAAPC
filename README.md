@@ -9,12 +9,22 @@ PDU's load readings become sensors, all grouped under one device.
 
 ## Supported devices
 
-APC rack PDUs that implement the `rPDU` branch of the APC PowerNet MIB
-(`.1.3.6.1.4.1.318.1.1.12`), which is the first-generation Switched Rack PDU
-range (AP79xx). It has been used with an AP7920; other AP79xx models use the
-same MIB and are expected to work. PDUs that only implement the newer `rPDU2`
-branch (for example many AP8xxx models) are not supported yet; setup reports
-that the device does not provide the APC rPDU MIB.
+APC switched PDUs, through whichever branch of the APC PowerNet MIB they
+implement. Setup works this out by itself:
+
+| Branch | PDUs | What you get |
+| --- | --- | --- |
+| `rPDU` (`.1.3.6.1.4.1.318.1.1.12`) | First-generation Switched Rack PDUs, AP79xx | Outlets, current and load state per phase/bank, power and outlet current where the model has them |
+| `rPDU2` (`.1.3.6.1.4.1.318.1.1.26`) | Switched Rack PDUs AP84xx, AP86xx, AP88xx and AP89xx | As rPDU, plus measured phase voltage and the PDU's energy meter (kWh) |
+| `sPDU` (`.1.3.6.1.4.1.318.1.1.4`) | MasterSwitch units that predate rPDU (AP92xx, AP96xx) | Outlets only; these report no load |
+
+The rPDU branch has been used with an AP7920. rPDU2 and sPDU support is built
+and tested against the MIB definitions but not yet on real hardware; please
+open an issue with your model if something reads wrong.
+
+With daisy-chained rPDU2 PDUs, an entry covers the PDU at the address you add;
+the PDUs chained behind it are not included. Metered-only PDUs, which have no
+switched outlets, are not supported.
 
 SNMPv1, SNMPv2c and SNMPv3 are supported.
 
@@ -72,7 +82,9 @@ and which readings the PDU supports, and names the entry after the PDU.
 | All outlets switch | On while any outlet is on; turning it on/off switches every outlet |
 | Current | Measured load in amps. Banked or multi-phase PDUs get one sensor per phase and bank |
 | Load state | `normal`, `low`, `near_overload` or `overload`, as judged by the PDU's own thresholds |
+| Voltage | Measured volts per phase (rPDU2) |
 | Power | Total watts, only if the PDU reports it |
+| Energy | The PDU's own kWh meter (rPDU2). Reset on the PDU, it starts again from zero, which the Energy dashboard handles |
 | Outlet current | Per-outlet amps, only on outlet-metered PDUs |
 | Rated current, Nominal voltage | Diagnostic values read from the PDU |
 
@@ -163,7 +175,7 @@ logger:
 
 ### OIDs used
 
-All under `.1.3.6.1.4.1.318.1.1.12` (PowerNet-MIB `rPDU`):
+`rPDU`, all under `.1.3.6.1.4.1.318.1.1.12`:
 
 | OID | Object |
 | --- | --- |
@@ -177,6 +189,30 @@ All under `.1.3.6.1.4.1.318.1.1.12` (PowerNet-MIB `rPDU`):
 | `.3.1.5.0` | number of monitored outlets |
 | `.3.3.1.1.4.N` | outlet command (1 = on, 2 = off) |
 | `.3.5.1.1.2.N` / `.3.5.1.1.4.N` / `.3.5.1.1.7.N` | outlet name / state / load (0.1 A) |
+
+`rPDU2`, all under `.1.3.6.1.4.1.318.1.1.26`. Tables are indexed by row; the
+module column says which chained PDU a row belongs to:
+
+| OID | Object |
+| --- | --- |
+| `.2.1.2.1` / `.3.1` / `.5.1` / `.6.1` / `.8.1` / `.9.1` | module, name, hardware rev., firmware rev., model, serial |
+| `.4.2.1.5.1` / `.4.2.1.6.1` / `.4.2.1.9.1` | switched outlets / metered outlets / max current (A) |
+| `.4.3.1.5.1` / `.4.3.1.9.1` | power (0.01 kW) / energy (0.1 kWh); -1 when not measured |
+| `.5.0` / `.7.0` / `.9.1.0` / `.9.3.0` | phase / bank / switched outlet / metered outlet table sizes |
+| `.6.3.1.2–.6.R` | phase module, number, load state, current (0.1 A), voltage (V) |
+| `.8.3.1.2–.5.R` | bank module, number, load state, current (0.1 A) |
+| `.9.2.3.1.2–.5.R` | outlet module, name, number, state (1 = off, 2 = on) |
+| `.9.2.4.1.5.R` | outlet command (1 = on, 2 = off) |
+| `.9.4.3.1.2` / `.4` / `.6.R` | metered outlet module, number, current (0.1 A) |
+
+`sPDU`, all under `.1.3.6.1.4.1.318.1.1.4`:
+
+| OID | Object |
+| --- | --- |
+| `.1.1.0` / `.1.2.0` / `.1.4.0` / `.1.5.0` | hardware rev., firmware rev., model, serial |
+| `.4.1.0` | number of outlets |
+| `.4.2.1.3.N` | outlet state on read, command on write (1 = on, 2 = off) |
+| `.4.2.1.4.N` | outlet name |
 
 ## Upgrading from 1.1.x
 
