@@ -15,6 +15,8 @@ _MODULES = getattr(api, "PROTOCOL_MODULES", None) or api.protoModules
 _decode_version = getattr(api, "decode_message_version", None) or api.decodeMessageVersion
 
 RPDU = "1.3.6.1.4.1.318.1.1.12"
+RPDU2 = "1.3.6.1.4.1.318.1.1.26"
+SPDU = "1.3.6.1.4.1.318.1.1.4"
 
 
 def _call(obj: Any, snake: str, camel: str, *args: Any) -> Any:
@@ -44,6 +46,68 @@ def ap7920_values(outlets: int = 8) -> dict[str, Any]:
         values[f"{RPDU}.3.3.1.1.4.{n}"] = 1 if n % 2 else 2
         values[f"{RPDU}.3.5.1.1.2.{n}"] = f"Outlet {n}"
         values[f"{RPDU}.3.5.1.1.4.{n}"] = 1 if n % 2 else 2
+    return values
+
+
+def ap8941_values() -> dict[str, Any]:
+    """An AP8941 (rPDU2): one phase, two banks, outlet metering, power and energy.
+
+    A second PDU (module 2, two outlets) is daisy-chained behind it, so its rows
+    appear in the same tables and must be left out.
+    """
+    values: dict[str, Any] = {
+        f"{RPDU2}.2.1.2.1": 1,
+        f"{RPDU2}.2.1.3.1": "Rack B",
+        f"{RPDU2}.2.1.5.1": "v2",
+        f"{RPDU2}.2.1.6.1": "v6.8.2",
+        f"{RPDU2}.2.1.8.1": "AP8941",
+        f"{RPDU2}.2.1.9.1": "5A1234E56789",
+        f"{RPDU2}.4.2.1.5.1": 8,
+        f"{RPDU2}.4.2.1.6.1": 8,
+        f"{RPDU2}.4.2.1.9.1": 16,
+        f"{RPDU2}.4.3.1.5.1": 38,  # 0.38 kW
+        f"{RPDU2}.4.3.1.9.1": 12345,  # 1234.5 kWh
+        f"{RPDU2}.5.0": 1,
+        f"{RPDU2}.7.0": 2,
+        f"{RPDU2}.9.1.0": 10,
+        f"{RPDU2}.9.3.0": 10,
+        # phase 1
+        f"{RPDU2}.6.3.1.2.1": 1,
+        f"{RPDU2}.6.3.1.3.1": 1,
+        f"{RPDU2}.6.3.1.4.1": 2,  # normal
+        f"{RPDU2}.6.3.1.5.1": 17,
+        f"{RPDU2}.6.3.1.6.1": 231,
+    }
+    for row, state, current in ((1, 2, 9), (2, 3, 8)):  # bank 2 near overload
+        values[f"{RPDU2}.8.3.1.2.{row}"] = 1
+        values[f"{RPDU2}.8.3.1.3.{row}"] = row
+        values[f"{RPDU2}.8.3.1.4.{row}"] = state
+        values[f"{RPDU2}.8.3.1.5.{row}"] = current
+    rows = [(row, 1, row) for row in range(1, 9)] + [(9, 2, 1), (10, 2, 2)]
+    for row, module, number in rows:
+        values[f"{RPDU2}.9.2.3.1.2.{row}"] = module
+        values[f"{RPDU2}.9.2.3.1.3.{row}"] = f"PDU{module} outlet {number}"
+        values[f"{RPDU2}.9.2.3.1.4.{row}"] = number
+        values[f"{RPDU2}.9.2.3.1.5.{row}"] = 2 if number % 2 else 1  # 2 = on
+        values[f"{RPDU2}.9.2.4.1.5.{row}"] = 1 if number % 2 else 2
+        values[f"{RPDU2}.9.4.3.1.2.{row}"] = module
+        values[f"{RPDU2}.9.4.3.1.4.{row}"] = number
+        values[f"{RPDU2}.9.4.3.1.6.{row}"] = number + 10 * (module - 1)
+    return values
+
+
+def ap9211_values(outlets: int = 8) -> dict[str, Any]:
+    """A MasterSwitch AP9211: sPDU only, outlets but no load readings."""
+    values: dict[str, Any] = {
+        f"{SPDU}.1.1.0": "B2",
+        f"{SPDU}.1.2.0": "v2.2.0",
+        f"{SPDU}.1.4.0": "AP9211",
+        f"{SPDU}.1.5.0": "WA9912345678",
+        f"{SPDU}.4.1.0": outlets,
+    }
+    for n in range(1, outlets + 1):
+        values[f"{SPDU}.4.2.1.3.{n}"] = 1 if n % 2 else 2
+        values[f"{SPDU}.4.2.1.4.{n}"] = f"Socket {n}"
     return values
 
 
@@ -124,6 +188,13 @@ class FakeAPCAgent(asyncio.DatagramProtocol):
                         outlet = key.rsplit(".", 1)[1]
                         self.values[key] = int(value)
                         self.values[f"{RPDU}.3.5.1.1.4.{outlet}"] = int(value)
+                    elif key.startswith(f"{RPDU2}.9.2.4.1.5."):
+                        row = key.rsplit(".", 1)[1]
+                        self.values[key] = int(value)
+                        # immediateOn (1) -> on (2), immediateOff (2) -> off (1)
+                        self.values[f"{RPDU2}.9.2.3.1.5.{row}"] = 2 if int(value) == 1 else 1
+                    elif key.startswith(f"{SPDU}.4.2.1.3."):
+                        self.values[key] = int(value)
                     else:
                         self.values[key] = value
                     out.append((oid, value))

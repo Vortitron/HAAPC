@@ -46,7 +46,7 @@
     "error": {
       "cannot_connect": "No answer from the PDU. Check the host, port, SNMP version and community: a PDU ignores requests with a wrong community, so this looks the same as an unreachable PDU.",
       "invalid_auth": "The PDU rejected the SNMPv3 user name or passphrases.",
-      "not_supported": "The device answered but does not provide the APC rPDU MIB. Only APC Switched Rack PDUs are supported.",
+      "not_supported": "The device answered but provides none of the APC PDU MIBs this integration reads (rPDU, rPDU2 or the older sPDU). Only APC switched rack PDUs are supported.",
       "key_too_short": "Passphrases must be at least 8 characters.",
       "priv_requires_auth": "Privacy (encryption) needs an authentication protocol.",
       "unknown": "Unexpected error, see the Home Assistant log."
@@ -137,8 +137,17 @@
           "overload": "Overload"
         }
       },
+      "voltage": {
+        "name": "Voltage"
+      },
+      "phase_voltage": {
+        "name": "Phase {number} voltage"
+      },
       "power": {
         "name": "Power"
+      },
+      "energy": {
+        "name": "Energy"
       },
       "rated_current": {
         "name": "Rated current"

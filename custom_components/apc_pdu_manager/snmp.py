@@ -1,4 +1,4 @@
-"""Async SNMP client for APC Switched Rack PDUs (PowerNet-MIB rPDU branch)."""
+"""Async SNMP client for APC Switched Rack PDUs (PowerNet-MIB rPDU, rPDU2 and sPDU)."""
 
 from __future__ import annotations
 
@@ -80,6 +80,49 @@ from .const import (
     AUTH_NONE,
     DEFAULT_PORT,
     LOAD_STATES,
+    LOAD_STATES2,
+    MIB_RPDU,
+    MIB_RPDU2,
+    MIB_SPDU,
+    OID2_BANK_CURRENT,
+    OID2_BANK_LOAD_STATE,
+    OID2_BANK_MODULE,
+    OID2_BANK_NUMBER,
+    OID2_BANK_TABLE_SIZE,
+    OID2_DEVICE_ENERGY,
+    OID2_DEVICE_MAX_CURRENT,
+    OID2_DEVICE_METERED_OUTLETS,
+    OID2_DEVICE_POWER,
+    OID2_DEVICE_SWITCHED_OUTLETS,
+    OID2_IDENT_FIRMWARE_REV,
+    OID2_IDENT_HARDWARE_REV,
+    OID2_IDENT_MODEL,
+    OID2_IDENT_MODULE,
+    OID2_IDENT_NAME,
+    OID2_IDENT_SERIAL,
+    OID2_METERED_CURRENT,
+    OID2_METERED_MODULE,
+    OID2_METERED_NUMBER,
+    OID2_METERED_TABLE_SIZE,
+    OID2_OUTLET_COMMAND,
+    OID2_OUTLET_MODULE,
+    OID2_OUTLET_NAME,
+    OID2_OUTLET_NUMBER,
+    OID2_OUTLET_STATE,
+    OID2_PHASE_CURRENT,
+    OID2_PHASE_LOAD_STATE,
+    OID2_PHASE_MODULE,
+    OID2_PHASE_NUMBER,
+    OID2_PHASE_TABLE_SIZE,
+    OID2_PHASE_VOLTAGE,
+    OID2_SWITCHED_TABLE_SIZE,
+    OIDS_FIRMWARE_REV,
+    OIDS_HARDWARE_REV,
+    OIDS_MODEL,
+    OIDS_OUTLET_COUNT,
+    OIDS_OUTLET_CTL,
+    OIDS_OUTLET_NAME,
+    OIDS_SERIAL,
     OID_DEVICE_RATING,
     OID_FIRMWARE_REV,
     OID_HARDWARE_REV,
@@ -100,6 +143,8 @@ from .const import (
     OID_PDU_NAME,
     OID_POWER_WATTS,
     OID_SERIAL,
+    OUTLET2_STATE_OFF,
+    OUTLET2_STATE_ON,
     OUTLET_COMMAND_OFF,
     OUTLET_COMMAND_ON,
     OUTLET_STATE_OFF,
@@ -188,7 +233,7 @@ class InvalidAuth(APCPDUError):
 
 
 class NotSupported(APCPDUError):
-    """The device answered but does not look like an APC Switched Rack PDU."""
+    """The device answered but does not look like an APC switched PDU."""
 
 
 class CommandFailed(APCPDUError):
@@ -215,6 +260,8 @@ class LoadEntry:
     index: int
     phase: int | None = None
     bank: int | None = None
+    # Row in the rPDU2 phase or bank table
+    row: int | None = None
 
 
 @dataclass
@@ -231,7 +278,27 @@ class PDUInfo:
     nominal_voltage: int | None = None
     has_power: bool = False
     has_outlet_current: bool = False
+    has_voltage: bool = False
+    has_energy: bool = False
     loads: list[LoadEntry] = field(default_factory=list)
+    mib: str = MIB_RPDU
+    # rPDU2 only: outlet number -> row in the switched / metered outlet tables
+    outlet_rows: dict[int, int] = field(default_factory=dict)
+    metered_rows: dict[int, int] = field(default_factory=dict)
+
+    @property
+    def outlet_numbers(self) -> list[int]:
+        """Numbers of the switched outlets."""
+        if self.outlet_rows:
+            return sorted(self.outlet_rows)
+        return list(range(1, self.outlet_count + 1))
+
+    @property
+    def metered_outlets(self) -> list[int]:
+        """Numbers of the outlets that report their own current."""
+        if self.mib == MIB_RPDU2:
+            return sorted(n for n in self.metered_rows if n in self.outlet_rows)
+        return self.outlet_numbers if self.has_outlet_current else []
 
 
 @dataclass
@@ -250,7 +317,9 @@ class PDUStatus:
     outlets: dict[int, OutletStatus]
     load_current: dict[int, float | None] = field(default_factory=dict)
     load_state: dict[int, str | None] = field(default_factory=dict)
+    voltage: dict[int, int | None] = field(default_factory=dict)
     power: int | None = None
+    energy: float | None = None  # kWh, rPDU2 only
 
 
 def _convert(value: Any) -> Any:
@@ -270,6 +339,21 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _non_negative(value: Any) -> int | None:
+    """rPDU2 reports -1 for a value the model does not measure."""
+    number = _as_int(value)
+    return number if number is not None and number >= 0 else None
+
+
+def _switch_state(value: Any, on: int, off: int) -> bool | None:
+    state = _as_int(value)
+    if state == on:
+        return True
+    if state == off:
+        return False
+    return None
 
 
 def _tenths(value: Any) -> float | None:
@@ -329,6 +413,7 @@ class APCPDUClient:
         self._target: Any = None
         self._auth_data: Any = None
         self._lock = asyncio.Lock()
+        self._info: PDUInfo | None = None
 
     def _build_auth_data(self) -> Any:
         auth = self._auth
@@ -436,7 +521,24 @@ class APCPDUClient:
             raise CommandFailed(_ERROR_STATUS.get(status, str(status)))
 
     async def async_get_info(self) -> PDUInfo:
-        """Identify the PDU and work out which optional values it provides."""
+        """Identify the PDU and work out which optional values it provides.
+
+        rPDU is tried first, so PDUs that also answer the older sPDU tables
+        (most AP79xx) keep the readings rPDU adds.
+        """
+        info = (
+            await self._async_get_rpdu_info()
+            or await self._async_get_rpdu2_info()
+            or await self._async_get_spdu_info()
+        )
+        if info is None:
+            raise NotSupported(
+                f"{self.host} answered but does not expose the APC rPDU, rPDU2 or sPDU MIB"
+            )
+        self._info = info
+        return info
+
+    async def _async_get_rpdu_info(self) -> PDUInfo | None:
         ident = await self.async_get(
             [
                 OID_MODEL,
@@ -449,10 +551,13 @@ class APCPDUClient:
         )
         outlet_count = _as_int(ident[OID_OUTLET_COUNT])
         if not ident[OID_MODEL] or not outlet_count or outlet_count < 1:
-            raise NotSupported(
-                f"{self.host} answered but does not expose the APC rPDU MIB "
-                f"(model={ident[OID_MODEL]!r}, outlets={ident[OID_OUTLET_COUNT]!r})"
+            _LOGGER.debug(
+                "%s has no rPDU MIB (model=%r, outlets=%r)",
+                self.host,
+                ident[OID_MODEL],
+                ident[OID_OUTLET_COUNT],
             )
+            return None
         extra = await self.async_get(
             [
                 OID_DEVICE_RATING,
@@ -495,9 +600,156 @@ class APCPDUClient:
             loads=loads,
         )
 
+    async def _async_get_rpdu2_info(self) -> PDUInfo | None:
+        # Row 1 of the ident and device tables is the PDU at this address;
+        # PDUs daisy-chained behind it are left out.
+        ident = await self.async_get(
+            [
+                f"{oid}.1"
+                for oid in (
+                    OID2_IDENT_MODEL,
+                    OID2_IDENT_SERIAL,
+                    OID2_IDENT_NAME,
+                    OID2_IDENT_FIRMWARE_REV,
+                    OID2_IDENT_HARDWARE_REV,
+                    OID2_IDENT_MODULE,
+                )
+            ]
+        )
+        if not (model := ident[f"{OID2_IDENT_MODEL}.1"]):
+            _LOGGER.debug("%s has no rPDU2 MIB", self.host)
+            return None
+        module = _as_int(ident[f"{OID2_IDENT_MODULE}.1"])
+        extra = await self.async_get(
+            [
+                f"{OID2_DEVICE_SWITCHED_OUTLETS}.1",
+                f"{OID2_DEVICE_METERED_OUTLETS}.1",
+                f"{OID2_DEVICE_MAX_CURRENT}.1",
+                f"{OID2_DEVICE_POWER}.1",
+                f"{OID2_DEVICE_ENERGY}.1",
+                OID2_PHASE_TABLE_SIZE,
+                OID2_BANK_TABLE_SIZE,
+                OID2_SWITCHED_TABLE_SIZE,
+                OID2_METERED_TABLE_SIZE,
+            ]
+        )
+        switched = _as_int(extra[f"{OID2_DEVICE_SWITCHED_OUTLETS}.1"]) or 0
+        metered = _as_int(extra[f"{OID2_DEVICE_METERED_OUTLETS}.1"]) or 0
+        outlet_rows = await self._async_rows(
+            _as_int(extra[OID2_SWITCHED_TABLE_SIZE]) or switched,
+            OID2_OUTLET_MODULE,
+            OID2_OUTLET_NUMBER,
+            module,
+        )
+        if not outlet_rows:
+            _LOGGER.debug("%s (%s) has no switched outlets", self.host, model)
+            return None
+        metered_rows = (
+            await self._async_rows(
+                _as_int(extra[OID2_METERED_TABLE_SIZE]) or metered,
+                OID2_METERED_MODULE,
+                OID2_METERED_NUMBER,
+                module,
+            )
+            if metered
+            else {}
+        )
+        phase_rows = await self._async_rows(
+            _as_int(extra[OID2_PHASE_TABLE_SIZE]) or 1,
+            OID2_PHASE_MODULE,
+            OID2_PHASE_NUMBER,
+            module,
+        )
+        bank_rows = await self._async_rows(
+            _as_int(extra[OID2_BANK_TABLE_SIZE]) or 0,
+            OID2_BANK_MODULE,
+            OID2_BANK_NUMBER,
+            module,
+        )
+        # Phases first, then banks, as rPDU numbers its load rows
+        loads = [
+            LoadEntry(index=index, phase=number, row=row)
+            for index, (number, row) in enumerate(sorted(phase_rows.items()), 1)
+        ]
+        loads += [
+            LoadEntry(index=index, bank=number, row=row)
+            for index, (number, row) in enumerate(sorted(bank_rows.items()), len(loads) + 1)
+        ]
+        has_voltage = False
+        if phase_rows:
+            first_phase = min(phase_rows.values())
+            voltage = await self.async_get([f"{OID2_PHASE_VOLTAGE}.{first_phase}"])
+            has_voltage = _non_negative(voltage[f"{OID2_PHASE_VOLTAGE}.{first_phase}"]) is not None
+        return PDUInfo(
+            model=model,
+            serial=ident[f"{OID2_IDENT_SERIAL}.1"] or None,
+            name=ident[f"{OID2_IDENT_NAME}.1"] or None,
+            firmware=ident[f"{OID2_IDENT_FIRMWARE_REV}.1"] or None,
+            hardware=ident[f"{OID2_IDENT_HARDWARE_REV}.1"] or None,
+            outlet_count=len(outlet_rows),
+            rated_current=_non_negative(extra[f"{OID2_DEVICE_MAX_CURRENT}.1"]) or None,
+            has_power=_non_negative(extra[f"{OID2_DEVICE_POWER}.1"]) is not None,
+            has_outlet_current=bool(metered_rows),
+            has_voltage=has_voltage,
+            has_energy=_non_negative(extra[f"{OID2_DEVICE_ENERGY}.1"]) is not None,
+            loads=loads,
+            mib=MIB_RPDU2,
+            outlet_rows=outlet_rows,
+            metered_rows=metered_rows,
+        )
+
+    async def _async_rows(
+        self, size: int, module_oid: str, number_oid: str, module: int | None
+    ) -> dict[int, int]:
+        """Map outlet, phase or bank number to its table row, for one PDU."""
+        if size < 1:
+            return {}
+        rows = range(1, size + 1)
+        values = await self.async_get(
+            [f"{oid}.{row}" for row in rows for oid in (module_oid, number_oid)]
+        )
+        numbers: dict[int, int] = {}
+        for row in rows:
+            if (number := _as_int(values[f"{number_oid}.{row}"])) is None:
+                continue
+            row_module = _as_int(values[f"{module_oid}.{row}"])
+            if module is not None and row_module is not None and row_module != module:
+                continue
+            numbers.setdefault(number, row)
+        return numbers
+
+    async def _async_get_spdu_info(self) -> PDUInfo | None:
+        ident = await self.async_get(
+            [OIDS_MODEL, OIDS_SERIAL, OIDS_FIRMWARE_REV, OIDS_HARDWARE_REV, OIDS_OUTLET_COUNT]
+        )
+        outlet_count = _as_int(ident[OIDS_OUTLET_COUNT])
+        if not ident[OIDS_MODEL] or not outlet_count or outlet_count < 1:
+            _LOGGER.debug("%s has no sPDU MIB", self.host)
+            return None
+        return PDUInfo(
+            model=ident[OIDS_MODEL],
+            serial=ident[OIDS_SERIAL] or None,
+            name=None,
+            firmware=ident[OIDS_FIRMWARE_REV] or None,
+            hardware=ident[OIDS_HARDWARE_REV] or None,
+            outlet_count=outlet_count,
+            mib=MIB_SPDU,
+        )
+
     async def async_get_status(self, info: PDUInfo) -> PDUStatus:
         """Poll outlet states and load readings."""
-        outlets = range(1, info.outlet_count + 1)
+        if info.mib == MIB_RPDU2:
+            status = await self._async_get_rpdu2_status(info)
+        elif info.mib == MIB_SPDU:
+            status = await self._async_get_spdu_status(info)
+        else:
+            status = await self._async_get_rpdu_status(info)
+        if all(outlet.is_on is None for outlet in status.outlets.values()):
+            raise APCPDUError("The PDU did not report any outlet state")
+        return status
+
+    async def _async_get_rpdu_status(self, info: PDUInfo) -> PDUStatus:
+        outlets = info.outlet_numbers
         oids = [f"{base}.{n}" for n in outlets for base in (OID_OUTLET_NAME, OID_OUTLET_STATE)]
         if info.has_outlet_current:
             oids += [f"{OID_OUTLET_CURRENT}.{n}" for n in outlets]
@@ -510,15 +762,10 @@ class APCPDUClient:
 
         status = PDUStatus(outlets={})
         for n in outlets:
-            state = _as_int(values[f"{OID_OUTLET_STATE}.{n}"])
             status.outlets[n] = OutletStatus(
                 name=values[f"{OID_OUTLET_NAME}.{n}"] or None,
-                is_on=(
-                    True
-                    if state == OUTLET_STATE_ON
-                    else False
-                    if state == OUTLET_STATE_OFF
-                    else None
+                is_on=_switch_state(
+                    values[f"{OID_OUTLET_STATE}.{n}"], OUTLET_STATE_ON, OUTLET_STATE_OFF
                 ),
                 current=(
                     _tenths(values[f"{OID_OUTLET_CURRENT}.{n}"])
@@ -526,8 +773,6 @@ class APCPDUClient:
                     else None
                 ),
             )
-        if all(outlet.is_on is None for outlet in status.outlets.values()):
-            raise APCPDUError("The PDU did not report any outlet state")
         for load in info.loads:
             status.load_current[load.index] = _tenths(values[f"{OID_LOAD_CURRENT}.{load.index}"])
             status.load_state[load.index] = LOAD_STATES.get(
@@ -537,11 +782,94 @@ class APCPDUClient:
             status.power = _as_int(values[OID_POWER_WATTS])
         return status
 
+    async def _async_get_rpdu2_status(self, info: PDUInfo) -> PDUStatus:
+        oids = [
+            f"{base}.{row}"
+            for row in info.outlet_rows.values()
+            for base in (OID2_OUTLET_NAME, OID2_OUTLET_STATE)
+        ]
+        oids += [f"{OID2_METERED_CURRENT}.{row}" for row in info.metered_rows.values()]
+        for load in info.loads:
+            if load.bank:
+                oids += [f"{OID2_BANK_CURRENT}.{load.row}", f"{OID2_BANK_LOAD_STATE}.{load.row}"]
+            else:
+                oids += [f"{OID2_PHASE_CURRENT}.{load.row}", f"{OID2_PHASE_LOAD_STATE}.{load.row}"]
+                if info.has_voltage:
+                    oids.append(f"{OID2_PHASE_VOLTAGE}.{load.row}")
+        if info.has_power:
+            oids.append(f"{OID2_DEVICE_POWER}.1")
+        if info.has_energy:
+            oids.append(f"{OID2_DEVICE_ENERGY}.1")
+
+        values = await self.async_get(oids)
+
+        status = PDUStatus(outlets={})
+        for n, row in info.outlet_rows.items():
+            metered_row = info.metered_rows.get(n)
+            status.outlets[n] = OutletStatus(
+                name=values[f"{OID2_OUTLET_NAME}.{row}"] or None,
+                is_on=_switch_state(
+                    values[f"{OID2_OUTLET_STATE}.{row}"], OUTLET2_STATE_ON, OUTLET2_STATE_OFF
+                ),
+                current=(
+                    _tenths(values[f"{OID2_METERED_CURRENT}.{metered_row}"])
+                    if metered_row is not None
+                    else None
+                ),
+            )
+        for load in info.loads:
+            current_oid, state_oid = (
+                (OID2_BANK_CURRENT, OID2_BANK_LOAD_STATE)
+                if load.bank
+                else (OID2_PHASE_CURRENT, OID2_PHASE_LOAD_STATE)
+            )
+            status.load_current[load.index] = _tenths(values[f"{current_oid}.{load.row}"])
+            status.load_state[load.index] = LOAD_STATES2.get(
+                _as_int(values[f"{state_oid}.{load.row}"])  # type: ignore[arg-type]
+            )
+            if info.has_voltage and not load.bank:
+                status.voltage[load.index] = _non_negative(
+                    values[f"{OID2_PHASE_VOLTAGE}.{load.row}"]
+                )
+        if (
+            info.has_power
+            and (power := _non_negative(values[f"{OID2_DEVICE_POWER}.1"])) is not None
+        ):
+            status.power = power * 10  # hundredths of kW
+        if (
+            info.has_energy
+            and (energy := _non_negative(values[f"{OID2_DEVICE_ENERGY}.1"])) is not None
+        ):
+            status.energy = energy / 10  # tenths of kWh
+        return status
+
+    async def _async_get_spdu_status(self, info: PDUInfo) -> PDUStatus:
+        outlets = info.outlet_numbers
+        values = await self.async_get(
+            [f"{base}.{n}" for n in outlets for base in (OIDS_OUTLET_NAME, OIDS_OUTLET_CTL)]
+        )
+        return PDUStatus(
+            outlets={
+                n: OutletStatus(
+                    name=values[f"{OIDS_OUTLET_NAME}.{n}"] or None,
+                    is_on=_switch_state(
+                        values[f"{OIDS_OUTLET_CTL}.{n}"], OUTLET_COMMAND_ON, OUTLET_COMMAND_OFF
+                    ),
+                )
+                for n in outlets
+            }
+        )
+
     async def async_set_outlet(self, outlet: int, on: bool) -> None:
         """Switch one outlet immediately."""
-        await self.async_set_int(
-            f"{OID_OUTLET_COMMAND}.{outlet}", OUTLET_COMMAND_ON if on else OUTLET_COMMAND_OFF
-        )
+        command = OUTLET_COMMAND_ON if on else OUTLET_COMMAND_OFF
+        info = self._info
+        if info is not None and info.mib == MIB_RPDU2:
+            await self.async_set_int(f"{OID2_OUTLET_COMMAND}.{info.outlet_rows[outlet]}", command)
+        elif info is not None and info.mib == MIB_SPDU:
+            await self.async_set_int(f"{OIDS_OUTLET_CTL}.{outlet}", command)
+        else:
+            await self.async_set_int(f"{OID_OUTLET_COMMAND}.{outlet}", command)
 
     async def async_close(self) -> None:
         """Release the SNMP engine's sockets."""

@@ -25,8 +25,7 @@ async def async_setup_entry(
     """Create one switch per outlet plus one for all outlets."""
     coordinator = entry.runtime_data
     entities: list[SwitchEntity] = [
-        APCPDUOutletSwitch(coordinator, outlet)
-        for outlet in range(1, coordinator.info.outlet_count + 1)
+        APCPDUOutletSwitch(coordinator, outlet) for outlet in coordinator.info.outlet_numbers
     ]
     entities.append(APCPDUAllOutletsSwitch(coordinator))
     async_add_entities(entities)

@@ -55,6 +55,8 @@ class FakePDU:
         self.load_current = {1: 1.7}
         self.load_state = {1: "normal"}
         self.power = 380
+        self.voltage: dict[int, int | None] = {}
+        self.energy: float | None = None
         self.info_error: Exception | None = None
         self.status_error: Exception | None = None
         self.set_error: Exception | None = None
@@ -68,13 +70,15 @@ class FakePDU:
                 n: OutletStatus(
                     name=self.names[n],
                     is_on=on,
-                    current=(n / 10 if self.info.has_outlet_current else None),
+                    current=(n / 10 if n in self.info.metered_outlets else None),
                 )
                 for n, on in self.outlets.items()
             },
             load_current=dict(self.load_current),
             load_state=dict(self.load_state),
+            voltage=dict(self.voltage),
             power=self.power if self.info.has_power else None,
+            energy=self.energy,
         )
 
 
