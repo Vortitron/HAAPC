@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-10-29
+
+### Changed
+- The integration is now `apc_pdu_manager`, shown as *APC PDU Manager*.
+  Tycho-MEC/apc-pdu, already in the HACS store, also uses the `apc_pdu` domain,
+  and the two would overwrite each other's folder. **Breaking:** the PDU has to
+  be deleted and added again once; see *Upgrading from 1.1.x* in the README.
+  Entity IDs stay the same.
+
 ## [1.1.0] - 2026-10-17
 
 Prepared for the HACS default store. Minimum Home Assistant version: 2025.3.

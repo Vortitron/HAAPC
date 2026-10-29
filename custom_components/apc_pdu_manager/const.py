@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-DOMAIN: Final = "apc_pdu"
+DOMAIN: Final = "apc_pdu_manager"
 MANUFACTURER: Final = "APC"
 
 # Config entry data keys (host and port use the homeassistant.const names)

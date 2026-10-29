@@ -1,5 +1,5 @@
 {
-  "name": "APC PDU",
+  "name": "APC PDU Manager",
   "homeassistant": "2025.3.0",
   "render_readme": true
 }
